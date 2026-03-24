@@ -95,7 +95,7 @@ export function ParticleField() {
     if (!materialRef.current) return;
 
     const { activeAct, actProgress, velocity } = useScrollStore.getState();
-    const nextAct = Math.min(activeAct + 1, ACT_ACCENT_COLORS.length - 1);
+    const nextAct = (activeAct + 1) % ACT_ACCENT_COLORS.length;
 
     materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
     materialRef.current.uniforms.uScrollVelocity.value = velocity;
