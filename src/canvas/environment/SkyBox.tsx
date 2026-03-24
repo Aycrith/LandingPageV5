@@ -3,7 +3,7 @@
 import { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useScrollStore } from "@/stores/scrollStore";
+import { useScrollStore, NUM_ACTS } from "@/stores/scrollStore";
 
 const ACT_SKY_COLORS = [
   { top: "#020208", bottom: "#050510", mid: "#0a0a1a" },
@@ -46,7 +46,7 @@ export function SkyBox() {
     if (!meshRef.current) return;
 
     const { activeAct, actProgress } = useScrollStore.getState();
-    const nextAct = Math.min(activeAct + 1, ACT_SKY_COLORS.length - 1);
+    const nextAct = (activeAct + 1) % NUM_ACTS;
     const mat = meshRef.current.material as THREE.ShaderMaterial;
 
     blendTop.copy(topColors[activeAct]).lerp(topColors[nextAct], actProgress);

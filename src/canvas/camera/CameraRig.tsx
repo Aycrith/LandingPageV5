@@ -8,6 +8,7 @@ import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useMouseParallax } from "@/hooks/useMouseParallax";
 import { ACT_VIEWPORT_PROFILES } from "../viewportProfiles";
 import { tupleToVector3 } from "@/lib/scene";
+import { getSplineEngine } from "../SplineEngine";
 
 const STARTUP_PROFILE = ACT_VIEWPORT_PROFILES[0];
 
@@ -30,17 +31,7 @@ export function CameraRig() {
   const startupSettlingStartedAt = useRef<number | null>(null);
   const startupSequenceComplete = useRef(false);
 
-  const curves = useMemo(() => {
-    return ACT_VIEWPORT_PROFILES.map((profile) => ({
-      posCurve: new THREE.CatmullRomCurve3(
-        profile.cameraPath.positions.map((point) => tupleToVector3(point))
-      ),
-      lookCurve: new THREE.CatmullRomCurve3(
-        profile.cameraPath.lookAts.map((point) => tupleToVector3(point))
-      ),
-      fovs: profile.cameraPath.fovs,
-    }));
-  }, []);
+  const spline = useMemo(() => getSplineEngine(), []);
 
   const startupPreview = useMemo(
     () => ({
@@ -75,16 +66,15 @@ export function CameraRig() {
     const perspCam = cameraRef.current;
     if (!perspCam) return;
 
-    const { activeAct, actProgress } = useScrollStore.getState();
+    const { progress } = useScrollStore.getState();
     const startupState = useSceneLoadStore.getState();
-    const act = curves[activeAct];
-    if (!act) return;
 
-    const t = THREE.MathUtils.clamp(actProgress, 0, 1);
-    let targetFov = act.fovs[0];
+    // Sample the unified spline at current progress (auto-wraps for infinite)
+    const sample = spline.sample(progress);
+    let targetFov = sample.fov;
     let allowParallax = true;
 
-    if (activeAct === 0 && !startupSequenceComplete.current) {
+    if (sample.actIndex === 0 && sample.actProgress < 0.3 && !startupSequenceComplete.current) {
       allowParallax = startupState.stableFrameReady;
 
       if (!startupState.stableFrameReady) {
@@ -123,19 +113,9 @@ export function CameraRig() {
       }
     } else {
       startupSequenceComplete.current = true;
-      act.posCurve.getPoint(t, targetPos.current);
-      act.lookCurve.getPoint(t, targetLookAt.current);
-
-      const fovIndex = Math.min(
-        Math.floor(t * (act.fovs.length - 1)),
-        act.fovs.length - 2
-      );
-      const fovT = t * (act.fovs.length - 1) - fovIndex;
-      targetFov = THREE.MathUtils.lerp(
-        act.fovs[fovIndex],
-        act.fovs[fovIndex + 1],
-        fovT
-      );
+      targetPos.current.copy(sample.position);
+      targetLookAt.current.copy(sample.lookAt);
+      targetFov = sample.fov;
     }
 
     if (allowParallax) {
