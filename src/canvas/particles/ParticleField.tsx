@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useScrollStore } from "@/stores/scrollStore";
@@ -8,6 +8,8 @@ import { useCapsStore } from "@/stores/capsStore";
 import { useMouseParallax } from "@/hooks/useMouseParallax";
 import vertexShader from "@/canvas/shaders/particles.vert.glsl";
 import fragmentShader from "@/canvas/shaders/particles.frag.glsl";
+import { seededUnit } from "@/lib/random";
+import { useSharedTexture } from "@/lib/textures";
 
 const ACT_ACCENT_COLORS = [
   new THREE.Color("#7ef2c6"),
@@ -32,20 +34,22 @@ export function ParticleField() {
 
     for (let i = 0; i < count; i++) {
       const i3 = i * 3;
+      const seed = i * 23;
+
       // Spherical distribution with varying density
-      const r = Math.pow(Math.random(), 0.5) * 40;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
+      const r = Math.pow(seededUnit(seed + 1), 0.5) * 40;
+      const theta = seededUnit(seed + 2) * Math.PI * 2;
+      const phi = Math.acos(2 * seededUnit(seed + 3) - 1);
 
       positions[i3] = r * Math.sin(phi) * Math.cos(theta);
       positions[i3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[i3 + 2] = r * Math.cos(phi);
 
-      randoms[i3] = Math.random();
-      randoms[i3 + 1] = Math.random() * 2 - 1;
-      randoms[i3 + 2] = Math.random();
+      randoms[i3] = seededUnit(seed + 4);
+      randoms[i3 + 1] = seededUnit(seed + 5) * 2 - 1;
+      randoms[i3 + 2] = seededUnit(seed + 6);
 
-      sizes[i] = 0.5 + Math.random() * 2.0;
+      sizes[i] = 0.5 + seededUnit(seed + 7) * 2.0;
     }
 
     return { positions, randoms, sizes };
@@ -58,9 +62,32 @@ export function ParticleField() {
       uMouse: { value: new THREE.Vector2(0, 0) },
       uActProgress: { value: 0 },
       uAccentColor: { value: new THREE.Color("#7ef2c6") },
+      // 1×1 white fallback — replaced once the noise texture finishes loading
+      uNoiseTexture: {
+        value: (() => {
+          const data = new Uint8Array([255, 255, 255, 255]);
+          const t = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+          t.needsUpdate = true;
+          return t;
+        })(),
+      },
     }),
     []
   );
+
+  const noiseTexture = useSharedTexture(
+    "/textures/volumetric/nebula-noise-1k-seamless.png",
+    {
+      wrapS: THREE.RepeatWrapping,
+      wrapT: THREE.RepeatWrapping,
+    }
+  );
+
+  useEffect(() => {
+    if (materialRef.current) {
+      materialRef.current.uniforms.uNoiseTexture.value = noiseTexture;
+    }
+  }, [noiseTexture]);
 
   const blendedColor = useMemo(() => new THREE.Color(), []);
 

@@ -2,34 +2,64 @@
 
 import { useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Preload } from "@react-three/drei";
 import { ACESFilmicToneMapping } from "three";
 import { SceneManager } from "./SceneManager";
 import { CameraRig } from "./camera/CameraRig";
 import { PostProcessingStack } from "./postfx/PostProcessingStack";
+import { StartupReadinessGate } from "./StartupReadinessGate";
+import { ViewportAuditProbe } from "./ViewportAuditProbe";
+import { ACT_VIEWPORT_PROFILES } from "./viewportProfiles";
 import {
   useCapsStore,
   detectCapabilities,
 } from "@/stores/capsStore";
 import { useUIStore } from "@/stores/uiStore";
+import {
+  getSceneStartupProgress,
+  isSceneStartupReady,
+  useSceneLoadStore,
+} from "@/stores/sceneLoadStore";
+import { useViewportAuditStore } from "@/stores/viewportAuditStore";
+
+const STARTUP_PROFILE = ACT_VIEWPORT_PROFILES[0];
 
 export default function Experience() {
   const caps = useCapsStore((s) => s.caps);
   const setCaps = useCapsStore((s) => s.setCaps);
+  const resetStartup = useSceneLoadStore((s) => s.resetStartup);
+  const resetViewportAudit = useViewportAuditStore((s) => s.reset);
+  const startupStartedAt = useSceneLoadStore((s) => s.startupStartedAt);
+  const startupProgress = useSceneLoadStore(getSceneStartupProgress);
+  const startupReady = useSceneLoadStore(isSceneStartupReady);
 
   useEffect(() => {
     const detected = detectCapabilities();
     setCaps(detected);
-  }, [setCaps]);
+    resetStartup();
+    resetViewportAudit();
+    useUIStore.getState().setLoadProgress(0);
+  }, [resetStartup, resetViewportAudit, setCaps]);
 
   useEffect(() => {
-    // Mark ready after a short delay to allow first render
-    const timer = setTimeout(() => {
+    useUIStore.getState().setLoadProgress(startupProgress);
+  }, [startupProgress]);
+
+  useEffect(() => {
+    if (!startupReady) return;
+
+    const elapsed = Date.now() - startupStartedAt;
+    const remaining = Math.max(
+      STARTUP_PROFILE.fxLayerBehavior.minimumVeilMs - elapsed,
+      0
+    );
+
+    const timer = window.setTimeout(() => {
       useUIStore.getState().setLoadProgress(1);
       useUIStore.getState().setReady();
-    }, 1500);
+    }, remaining);
+
     return () => clearTimeout(timer);
-  }, []);
+  }, [startupReady, startupStartedAt]);
 
   if (!caps) return null;
 
@@ -38,19 +68,26 @@ export default function Experience() {
       gl={{
         antialias: caps.tier !== "low",
         alpha: false,
-        powerPreference: "high-performance",
+        powerPreference: caps.tier === "high" ? "high-performance" : "low-power",
         toneMapping: ACESFilmicToneMapping,
         toneMappingExposure: 1.0,
       }}
       dpr={caps.dpr}
-      shadows={caps.enableShadows}
-      camera={{ position: [0, 0, 8], fov: 50, near: 0.1, far: 200 }}
+      performance={{ min: 0.3, max: 1, debounce: 250 }}
+      shadows={caps.enableShadows ? "percentage" : false}
+      camera={{
+        position: STARTUP_PROFILE.previewCamera.position,
+        fov: STARTUP_PROFILE.previewCamera.fov,
+        near: 0.1,
+        far: 200,
+      }}
       style={{ background: "#050507" }}
     >
+      <StartupReadinessGate />
+      <ViewportAuditProbe />
       <CameraRig />
       <SceneManager />
       <PostProcessingStack />
-      <Preload all />
     </Canvas>
   );
 }

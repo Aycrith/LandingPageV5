@@ -5,36 +5,71 @@ import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { HologramMaterial } from "@/canvas/materials/HologramMaterial";
+import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
+import { useViewportAuditStore } from "@/stores/viewportAuditStore";
+import { seededUnit } from "@/lib/random";
+import {
+  fitScaleToViewportFill,
+  getViewportHeightAtDistance,
+  useSceneBounds,
+  useStableSceneClone,
+} from "@/lib/scene";
+import { useRepeatingTexture } from "@/lib/textures";
 
 interface ActProps {
   progress: number;
   visible: boolean;
 }
 
+const ACT_PROFILE = ACT_VIEWPORT_PROFILES[2];
+
 function HologramModel({ progress }: { progress: number }) {
   const groupRef = useRef<THREE.Group>(null);
+  const worldPosRef = useRef(new THREE.Vector3());
+  const gltf = useGLTF("/models/hologram.glb");
+  const sceneClone = useStableSceneClone(gltf.scene);
+  const bounds = useSceneBounds(gltf.scene);
 
-  let gltf: { scene: THREE.Group } | null = null;
-  try {
-    gltf = useGLTF("/models/hologram.glb");
-  } catch {
-    // Missing
-  }
+  const fittedMaxScale = useMemo(
+    () =>
+      fitScaleToViewportFill({
+        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
+        rawHeight: bounds.height,
+        maxFill:
+          ACT_PROFILE.maxModelViewportFill *
+          ACT_PROFILE.heroModelBehavior.fitPadding,
+        previewCamera: ACT_PROFILE.previewCamera,
+        settleCamera: ACT_PROFILE.settleCamera,
+      }),
+    [bounds.height]
+  );
 
   useFrame((state) => {
     if (!groupRef.current) return;
     const t = state.clock.elapsedTime;
+    const camera = state.camera as THREE.PerspectiveCamera;
     groupRef.current.rotation.y = t * 0.2;
     const appear = Math.max(0, (progress - 0.2) / 0.3);
-    groupRef.current.scale.setScalar(Math.min(appear, 1) * 0.015);
+    const desiredScale = Math.min(appear, 1) * 0.015;
+    const appliedScale = Math.min(desiredScale, fittedMaxScale);
+    groupRef.current.scale.setScalar(appliedScale);
     groupRef.current.position.y = Math.sin(t * 0.5) * 0.3 + 2;
-  });
 
-  if (!gltf) return null;
+    groupRef.current.getWorldPosition(worldPosRef.current);
+    const distance = worldPosRef.current.distanceTo(camera.position);
+    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
+
+    useViewportAuditStore.getState().reportHeroModel("act3-hologram", {
+      desiredScale,
+      appliedScale,
+      fillRatio: (bounds.height * appliedScale) / visibleHeight,
+      maxFill: ACT_PROFILE.maxModelViewportFill,
+    });
+  });
 
   return (
     <group ref={groupRef} position={[3, 2, -1]}>
-      <primitive object={gltf.scene.clone()} />
+      <primitive object={sceneClone} />
     </group>
   );
 }
@@ -43,30 +78,29 @@ export function Act3Flow({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
   const surfaceRef = useRef<THREE.Mesh>(null);
   const surfacePositions = useRef<Float32Array | null>(null);
+  const normalFrameRef = useRef(0);
 
-  // Ribbon data
   const ribbonCount = 10;
   const ribbonData = useMemo(() => {
     return Array.from({ length: ribbonCount }, (_, i) => ({
       radius: 3 + i * 0.5,
-      speed: 0.2 + Math.random() * 0.25,
+      speed: 0.2 + seededUnit(i * 13 + 1) * 0.25,
       yOffset: (i - ribbonCount / 2) * 0.6,
       phase: (i / ribbonCount) * Math.PI * 2,
-      frequency: 1.5 + Math.random() * 2,
-      amplitude: 0.3 + Math.random() * 0.7,
+      frequency: 1.5 + seededUnit(i * 13 + 2) * 2,
+      amplitude: 0.3 + seededUnit(i * 13 + 3) * 0.7,
     }));
   }, []);
 
-  // Tube geometries for ribbons
   const ribbonGeometries = useMemo(() => {
-    return ribbonData.map((d) => {
+    return ribbonData.map((data) => {
       const curve = new THREE.CatmullRomCurve3(
         Array.from({ length: 24 }, (_, i) => {
           const t = (i / 23) * Math.PI * 2;
           return new THREE.Vector3(
-            Math.cos(t) * d.radius,
-            d.yOffset + Math.sin(t * d.frequency) * d.amplitude,
-            Math.sin(t) * d.radius
+            Math.cos(t) * data.radius,
+            data.yOffset + Math.sin(t * data.frequency) * data.amplitude,
+            Math.sin(t) * data.radius
           );
         }),
         true
@@ -81,7 +115,6 @@ export function Act3Flow({ progress, visible }: ActProps) {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
 
-    // Vertex-displaced fluid surface
     if (surfaceRef.current) {
       const geo = surfaceRef.current.geometry;
       const pos = geo.attributes.position;
@@ -93,14 +126,20 @@ export function Act3Flow({ progress, visible }: ActProps) {
       for (let i = 0; i < pos.count; i++) {
         const x = orig[i * 3];
         const z = orig[i * 3 + 2];
-        const wave1 = Math.sin(x * 0.4 + t * 0.6) * Math.cos(z * 0.3 + t * 0.4) * 1.0;
+        const wave1 =
+          Math.sin(x * 0.4 + t * 0.6) * Math.cos(z * 0.3 + t * 0.4) * 1.0;
         const wave2 = Math.sin(x * 1.0 + t * 1.0 + z * 0.6) * 0.35;
         const wave3 = Math.cos(x * 0.2 - t * 0.3 + z * 1.2) * 0.25;
-        const ripple = Math.sin(Math.sqrt(x * x + z * z) * 0.8 - t * 1.5) * 0.2;
+        const ripple =
+          Math.sin(Math.sqrt(x * x + z * z) * 0.8 - t * 1.5) * 0.2;
         pos.array[i * 3 + 1] = (wave1 + wave2 + wave3 + ripple) * progress;
       }
+
       pos.needsUpdate = true;
-      geo.computeVertexNormals();
+      normalFrameRef.current += 1;
+      if (normalFrameRef.current % 3 === 0) {
+        geo.computeVertexNormals();
+      }
 
       const scaleIn = Math.min(progress / 0.25, 1);
       surfaceRef.current.scale.setScalar(scaleIn);
@@ -116,7 +155,6 @@ export function Act3Flow({ progress, visible }: ActProps) {
 
   return (
     <group ref={groupRef} rotation={[-0.2, 0, 0]} position={[0, -2, 0]}>
-      {/* Fluid surface */}
       <mesh ref={surfaceRef} geometry={planeGeo} rotation={[-Math.PI / 2, 0, 0]}>
         <meshStandardMaterial
           color="#d0a2ff"
@@ -130,25 +168,40 @@ export function Act3Flow({ progress, visible }: ActProps) {
         />
       </mesh>
 
-      {/* Flow ribbons */}
-      {ribbonGeometries.map((geo, i) => (
-        <FlowRibbon key={i} geometry={geo} data={ribbonData[i]} progress={progress} />
+      {ribbonGeometries.map((geometry, i) => (
+        <FlowRibbon
+          key={i}
+          geometry={geometry}
+          data={ribbonData[i]}
+          progress={progress}
+        />
       ))}
 
-      {/* Hologram floating above */}
       <Suspense fallback={null}>
         <HologramModel progress={progress} />
       </Suspense>
 
-      {/* Hologram pedestal */}
+      <Metal049ASurface progress={progress} />
+
       <mesh position={[3, 0.5, -1]}>
         <cylinderGeometry args={[0.3, 0.5, 1, 16]} />
         <HologramMaterial color="#d0a2ff" />
       </mesh>
 
-      {/* Lighting */}
-      <pointLight color="#d0a2ff" intensity={progress * 15} distance={25} decay={2} position={[0, 3, 0]} />
-      <pointLight color="#6dc7ff" intensity={progress * 5} distance={15} decay={2} position={[3, 4, -1]} />
+      <pointLight
+        color="#d0a2ff"
+        intensity={progress * 15}
+        distance={25}
+        decay={2}
+        position={[0, 3, 0]}
+      />
+      <pointLight
+        color="#6dc7ff"
+        intensity={progress * 5}
+        distance={15}
+        decay={2}
+        position={[3, 4, -1]}
+      />
     </group>
   );
 }
@@ -166,7 +219,8 @@ function FlowRibbon({
 
   useFrame((state) => {
     if (!meshRef.current) return;
-    meshRef.current.rotation.y = state.clock.elapsedTime * data.speed + data.phase;
+    meshRef.current.rotation.y =
+      state.clock.elapsedTime * data.speed + data.phase;
     const mat = meshRef.current.material as THREE.MeshBasicMaterial;
     mat.opacity = Math.min(progress / 0.3, 1) * 0.4;
   });
@@ -184,8 +238,52 @@ function FlowRibbon({
   );
 }
 
-try {
-  useGLTF.preload("/models/hologram.glb");
-} catch {
-  // Silent
+function Metal049ASurface({ progress }: { progress: number }) {
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const colorMap = useRepeatingTexture(
+    "/textures/pbr/metal049a/Metal049A_2K-PNG_Color.png",
+    {
+      repeat: 6,
+      colorSpace: THREE.SRGBColorSpace,
+    }
+  );
+  const normalMap = useRepeatingTexture(
+    "/textures/pbr/metal049a/Metal049A_2K-PNG_NormalGL.png",
+    { repeat: 6 }
+  );
+  const roughnessMap = useRepeatingTexture(
+    "/textures/pbr/metal049a/Metal049A_2K-PNG_Roughness.png",
+    { repeat: 6 }
+  );
+  const metalnessMap = useRepeatingTexture(
+    "/textures/pbr/metal049a/Metal049A_2K-PNG_Metalness.png",
+    { repeat: 6 }
+  );
+
+  useFrame(() => {
+    if (matRef.current) {
+      matRef.current.opacity = Math.min(progress / 0.4, 1) * 0.65;
+    }
+  });
+
+  return (
+    <mesh rotation-x={-Math.PI / 2} position={[0, -3.5, 0]}>
+      <circleGeometry args={[22, 64]} />
+      <meshStandardMaterial
+        ref={matRef}
+        map={colorMap}
+        normalMap={normalMap}
+        roughnessMap={roughnessMap}
+        metalnessMap={metalnessMap}
+        roughness={0.3}
+        metalness={0.85}
+        transparent
+        opacity={0}
+        envMapIntensity={1.2}
+        depthWrite={false}
+      />
+    </mesh>
+  );
 }
+
+useGLTF.preload("/models/hologram.glb");

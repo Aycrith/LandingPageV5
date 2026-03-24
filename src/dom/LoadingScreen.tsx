@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useUIStore } from "@/stores/uiStore";
 
 export function LoadingScreen() {
@@ -8,14 +8,11 @@ export function LoadingScreen() {
   const loadProgress = useUIStore((s) => s.loadProgress);
   const isReady = useUIStore((s) => s.isReady);
   const dismissLoading = useUIStore((s) => s.dismissLoading);
-  const [fading, setFading] = useState(false);
 
   useEffect(() => {
-    if (isReady) {
-      setFading(true);
-      const timer = setTimeout(dismissLoading, 1200);
-      return () => clearTimeout(timer);
-    }
+    if (!isReady) return;
+    const timer = setTimeout(dismissLoading, 1200);
+    return () => clearTimeout(timer);
   }, [isReady, dismissLoading]);
 
   if (!isLoading) return null;
@@ -26,7 +23,7 @@ export function LoadingScreen() {
     <div
       className="loading-screen"
       style={{
-        opacity: fading ? 0 : 1,
+        opacity: isReady ? 0 : 1,
         transition: "opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >

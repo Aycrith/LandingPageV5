@@ -20,9 +20,33 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
+  ),
   title: "Immersive 3D Experience",
   description:
     "A cinematic, scroll-driven 3D interactive experience with GPU particles, custom shaders, and physics.",
+  openGraph: {
+    title: "Immersive 3D Experience",
+    description:
+      "A cinematic, scroll-driven 3D interactive experience with GPU particles, custom shaders, and physics.",
+    type: "website",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Immersive 3D Experience social preview",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Immersive 3D Experience",
+    description:
+      "A cinematic, scroll-driven 3D interactive experience with GPU particles, custom shaders, and physics.",
+    images: ["/twitter-image"],
+  },
 };
 
 export const viewport: Viewport = {

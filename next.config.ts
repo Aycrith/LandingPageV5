@@ -1,8 +1,13 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   transpilePackages: ["three"],
   turbopack: {
+    root: projectRoot,
     rules: {
       "*.glsl": { loaders: ["raw-loader"], as: "*.js" },
       "*.wgsl": { loaders: ["raw-loader"], as: "*.js" },

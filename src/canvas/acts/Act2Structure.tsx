@@ -5,60 +5,100 @@ import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { WireframePulseMaterial } from "@/canvas/materials/WireframePulse";
+import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
+import { useViewportAuditStore } from "@/stores/viewportAuditStore";
+import { seededUnit } from "@/lib/random";
+import {
+  fitScaleToViewportFill,
+  getViewportHeightAtDistance,
+  useSceneBounds,
+  useStableSceneClone,
+} from "@/lib/scene";
+import { useRepeatingTexture } from "@/lib/textures";
 
 interface ActProps {
   progress: number;
   visible: boolean;
 }
 
+const ACT_PROFILE = ACT_VIEWPORT_PROFILES[1];
+
 function GlobeModel({ progress }: { progress: number }) {
   const groupRef = useRef<THREE.Group>(null);
+  const worldPosRef = useRef(new THREE.Vector3());
+  const gltf = useGLTF("/models/wireframe_3d_globe.glb");
+  const sceneClone = useStableSceneClone(gltf.scene);
+  const bounds = useSceneBounds(gltf.scene);
 
-  let gltf: { scene: THREE.Group } | null = null;
-  try {
-    gltf = useGLTF("/models/wireframe_3d_globe.glb");
-  } catch {
-    // Missing
-  }
+  const fittedMaxScale = useMemo(
+    () =>
+      fitScaleToViewportFill({
+        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
+        rawHeight: bounds.height,
+        maxFill:
+          ACT_PROFILE.maxModelViewportFill *
+          ACT_PROFILE.heroModelBehavior.fitPadding,
+        previewCamera: ACT_PROFILE.previewCamera,
+        settleCamera: ACT_PROFILE.settleCamera,
+      }),
+    [bounds.height]
+  );
 
   useFrame((state) => {
     if (!groupRef.current) return;
     groupRef.current.rotation.y = state.clock.elapsedTime * 0.12;
-    const scale = Math.min(progress / 0.3, 1) * 0.02;
-    groupRef.current.scale.setScalar(scale);
-  });
+    const desiredScale = Math.min(progress / 0.3, 1) * 0.02;
+    const appliedScale = Math.min(desiredScale, fittedMaxScale);
+    const camera = state.camera as THREE.PerspectiveCamera;
 
-  if (!gltf) return null;
+    groupRef.current.scale.setScalar(appliedScale);
+    groupRef.current.getWorldPosition(worldPosRef.current);
+    const distance = worldPosRef.current.distanceTo(camera.position);
+    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
+
+    useViewportAuditStore.getState().reportHeroModel("act2-globe", {
+      desiredScale,
+      appliedScale,
+      fillRatio: (bounds.height * appliedScale) / visibleHeight,
+      maxFill: ACT_PROFILE.maxModelViewportFill,
+    });
+  });
 
   return (
     <group ref={groupRef}>
-      <primitive object={gltf.scene.clone()} />
+      <primitive object={sceneClone} />
     </group>
   );
 }
 
 function SatellitesModel({ progress }: { progress: number }) {
   const groupRef = useRef<THREE.Group>(null);
+  const gltf = useGLTF("/models/satellites/scene.gltf");
+  const sceneClone = useStableSceneClone(gltf.scene);
+  const bounds = useSceneBounds(gltf.scene);
 
-  let gltf: { scene: THREE.Group } | null = null;
-  try {
-    gltf = useGLTF("/models/satellites/scene.gltf");
-  } catch {
-    // Missing
-  }
+  const fittedMaxScale = useMemo(
+    () =>
+      fitScaleToViewportFill({
+        desiredScale: 0.01,
+        rawHeight: bounds.height,
+        maxFill: ACT_PROFILE.maxModelViewportFill * 0.9,
+        previewCamera: ACT_PROFILE.previewCamera,
+        settleCamera: ACT_PROFILE.settleCamera,
+      }),
+    [bounds.height]
+  );
 
   useFrame((state) => {
     if (!groupRef.current) return;
     groupRef.current.rotation.y = -state.clock.elapsedTime * 0.08;
     const appear = Math.max(0, (progress - 0.3) / 0.4);
-    groupRef.current.scale.setScalar(Math.min(appear, 1) * 0.01);
+    groupRef.current.scale.setScalar(Math.min(Math.min(appear, 1) * 0.01, fittedMaxScale));
   });
-
-  if (!gltf) return null;
 
   return (
     <group ref={groupRef} position={[3, 1, -2]}>
-      <primitive object={gltf.scene.clone()} />
+      <primitive object={sceneClone} />
     </group>
   );
 }
@@ -73,13 +113,12 @@ export function Act2Structure({ progress, visible }: ActProps) {
 
   const orbits = useMemo(() => {
     return Array.from({ length: bodyCount }, (_, i) => ({
-      radius: 3 + Math.random() * 5,
-      speed: 0.15 + Math.random() * 0.35,
-      tilt: Math.random() * Math.PI,
+      radius: 3 + seededUnit(i * 17 + 1) * 5,
+      speed: 0.15 + seededUnit(i * 17 + 2) * 0.35,
+      tilt: seededUnit(i * 17 + 3) * Math.PI,
       phase: (i / bodyCount) * Math.PI * 2,
-      scale: 0.08 + Math.random() * 0.2,
-      yOffset: (Math.random() - 0.5) * 4,
-      geometry: Math.floor(Math.random() * 3), // 0=octa, 1=tetra, 2=icosa
+      scale: 0.08 + seededUnit(i * 17 + 4) * 0.2,
+      yOffset: seededUnit(i * 17 + 5) * 4 - 2,
     }));
   }, []);
 
@@ -87,7 +126,6 @@ export function Act2Structure({ progress, visible }: ActProps) {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
 
-    // Procedural wireframe globe
     if (globeRef.current) {
       globeRef.current.rotation.y = t * 0.12;
       globeRef.current.rotation.x = Math.sin(t * 0.08) * 0.1;
@@ -95,22 +133,25 @@ export function Act2Structure({ progress, visible }: ActProps) {
       globeRef.current.scale.setScalar(scaleIn * 2.2);
     }
 
-    // Floating bodies
     if (instanceRef.current) {
       for (let i = 0; i < bodyCount; i++) {
-        const o = orbits[i];
-        const angle = t * o.speed + o.phase;
+        const orbit = orbits[i];
+        const angle = t * orbit.speed + orbit.phase;
         const bodyProgress = Math.max(0, (progress - 0.08 - i * 0.015) / 0.35);
         const appear = Math.min(1, bodyProgress);
         const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
 
         dummy.position.set(
-          Math.cos(angle) * o.radius * Math.cos(o.tilt),
-          o.yOffset + Math.sin(t * 0.5 + o.phase) * 0.6,
-          Math.sin(angle) * o.radius
+          Math.cos(angle) * orbit.radius * Math.cos(orbit.tilt),
+          orbit.yOffset + Math.sin(t * 0.5 + orbit.phase) * 0.6,
+          Math.sin(angle) * orbit.radius
         );
-        dummy.scale.setScalar(o.scale * appear * fadeOut);
-        dummy.rotation.set(t * o.speed * 0.5, t * o.speed * 0.3, t * o.speed * 0.7);
+        dummy.scale.setScalar(orbit.scale * appear * fadeOut);
+        dummy.rotation.set(
+          t * orbit.speed * 0.5,
+          t * orbit.speed * 0.3,
+          t * orbit.speed * 0.7
+        );
         dummy.updateMatrix();
         instanceRef.current.setMatrixAt(i, dummy.matrix);
       }
@@ -126,13 +167,11 @@ export function Act2Structure({ progress, visible }: ActProps) {
 
   return (
     <group ref={groupRef}>
-      {/* Wireframe globe with pulse material */}
       <mesh ref={globeRef}>
         <icosahedronGeometry args={[2, 4]} />
         <WireframePulseMaterial color="#6dc7ff" pulseSpeed={1.5} />
       </mesh>
 
-      {/* Secondary wireframe layer */}
       <mesh rotation={[0, Math.PI / 4, Math.PI / 6]}>
         <icosahedronGeometry args={[2.3, 2]} />
         <meshBasicMaterial
@@ -145,8 +184,11 @@ export function Act2Structure({ progress, visible }: ActProps) {
         />
       </mesh>
 
-      {/* Floating geometric bodies */}
-      <instancedMesh ref={instanceRef} args={[undefined, undefined, bodyCount]} castShadow>
+      <instancedMesh
+        ref={instanceRef}
+        args={[undefined, undefined, bodyCount]}
+        castShadow
+      >
         <octahedronGeometry args={[1, 0]} />
         <meshStandardMaterial
           color="#6dc7ff"
@@ -157,22 +199,67 @@ export function Act2Structure({ progress, visible }: ActProps) {
         />
       </instancedMesh>
 
-      {/* Loaded models */}
       <Suspense fallback={null}>
         <GlobeModel progress={progress} />
         <SatellitesModel progress={progress} />
       </Suspense>
 
-      {/* Lighting */}
+      <Rock063Ground progress={progress} />
+
       <pointLight color="#6dc7ff" intensity={10} distance={25} decay={2} />
-      <pointLight color="#ffffff" intensity={3} distance={15} decay={2} position={[0, 5, 0]} />
+      <pointLight
+        color="#ffffff"
+        intensity={3}
+        distance={15}
+        decay={2}
+        position={[0, 5, 0]}
+      />
     </group>
   );
 }
 
-try {
-  useGLTF.preload("/models/wireframe_3d_globe.glb");
-  useGLTF.preload("/models/satellites/scene.gltf");
-} catch {
-  // Silent
+function Rock063Ground({ progress }: { progress: number }) {
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const colorMap = useRepeatingTexture(
+    "/textures/pbr/rock063/Rock063_2K-PNG_Color.png",
+    {
+      repeat: 8,
+      colorSpace: THREE.SRGBColorSpace,
+    }
+  );
+  const normalMap = useRepeatingTexture(
+    "/textures/pbr/rock063/Rock063_2K-PNG_NormalGL.png",
+    { repeat: 8 }
+  );
+  const roughnessMap = useRepeatingTexture(
+    "/textures/pbr/rock063/Rock063_2K-PNG_Roughness.png",
+    { repeat: 8 }
+  );
+
+  useFrame(() => {
+    if (matRef.current) {
+      matRef.current.opacity = Math.min(progress / 0.4, 1) * 0.72;
+    }
+  });
+
+  return (
+    <mesh rotation-x={-Math.PI / 2} position={[0, -5, 0]}>
+      <circleGeometry args={[25, 64]} />
+      <meshStandardMaterial
+        ref={matRef}
+        map={colorMap}
+        normalMap={normalMap}
+        roughnessMap={roughnessMap}
+        roughness={1}
+        metalness={0}
+        transparent
+        opacity={0}
+        envMapIntensity={0.8}
+        depthWrite={false}
+      />
+    </mesh>
+  );
 }
+
+useGLTF.preload("/models/wireframe_3d_globe.glb");
+useGLTF.preload("/models/satellites/scene.gltf");

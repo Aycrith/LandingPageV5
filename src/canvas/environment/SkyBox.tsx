@@ -15,15 +15,27 @@ const ACT_SKY_COLORS = [
 
 export function SkyBox() {
   const meshRef = useRef<THREE.Mesh>(null);
+  const topColors = useMemo(
+    () => ACT_SKY_COLORS.map((palette) => new THREE.Color(palette.top)),
+    []
+  );
+  const midColors = useMemo(
+    () => ACT_SKY_COLORS.map((palette) => new THREE.Color(palette.mid)),
+    []
+  );
+  const bottomColors = useMemo(
+    () => ACT_SKY_COLORS.map((palette) => new THREE.Color(palette.bottom)),
+    []
+  );
 
   const uniforms = useMemo(
     () => ({
-      uTopColor: { value: new THREE.Color(ACT_SKY_COLORS[0].top) },
-      uMidColor: { value: new THREE.Color(ACT_SKY_COLORS[0].mid) },
-      uBottomColor: { value: new THREE.Color(ACT_SKY_COLORS[0].bottom) },
+      uTopColor: { value: topColors[0].clone() },
+      uMidColor: { value: midColors[0].clone() },
+      uBottomColor: { value: bottomColors[0].clone() },
       uTime: { value: 0 },
     }),
-    []
+    [bottomColors, midColors, topColors]
   );
 
   const blendTop = useMemo(() => new THREE.Color(), []);
@@ -31,19 +43,22 @@ export function SkyBox() {
   const blendBot = useMemo(() => new THREE.Color(), []);
 
   useFrame((state) => {
+    if (!meshRef.current) return;
+
     const { activeAct, actProgress } = useScrollStore.getState();
     const nextAct = Math.min(activeAct + 1, ACT_SKY_COLORS.length - 1);
-    const a = ACT_SKY_COLORS[activeAct];
-    const b = ACT_SKY_COLORS[nextAct];
+    const mat = meshRef.current.material as THREE.ShaderMaterial;
 
-    blendTop.set(a.top).lerp(new THREE.Color(b.top), actProgress);
-    blendMid.set(a.mid).lerp(new THREE.Color(b.mid), actProgress);
-    blendBot.set(a.bottom).lerp(new THREE.Color(b.bottom), actProgress);
+    blendTop.copy(topColors[activeAct]).lerp(topColors[nextAct], actProgress);
+    blendMid.copy(midColors[activeAct]).lerp(midColors[nextAct], actProgress);
+    blendBot
+      .copy(bottomColors[activeAct])
+      .lerp(bottomColors[nextAct], actProgress);
 
-    uniforms.uTopColor.value.copy(blendTop);
-    uniforms.uMidColor.value.copy(blendMid);
-    uniforms.uBottomColor.value.copy(blendBot);
-    uniforms.uTime.value = state.clock.elapsedTime;
+    (mat.uniforms.uTopColor.value as THREE.Color).copy(blendTop);
+    (mat.uniforms.uMidColor.value as THREE.Color).copy(blendMid);
+    (mat.uniforms.uBottomColor.value as THREE.Color).copy(blendBot);
+    mat.uniforms.uTime.value = state.clock.elapsedTime;
   });
 
   return (

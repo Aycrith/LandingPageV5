@@ -3,6 +3,7 @@ uniform float uScrollVelocity;
 uniform vec2 uMouse;
 uniform float uActProgress;
 uniform vec3 uAccentColor;
+uniform sampler2D uNoiseTexture;
 
 attribute vec3 aRandom;
 attribute float aSize;
@@ -122,7 +123,14 @@ void main() {
   // Distance-based alpha
   float dist = -mvPosition.z;
   vDistance = dist;
-  vAlpha = smoothstep(80.0, 5.0, dist) * (0.3 + aRandom.z * 0.7);
+
+  // Volumetric density — sample the seamless noise texture in world XZ to
+  // create nebula-like clusters where particles appear denser.
+  vec2 densityUV = fract(pos.xz * 0.018 + 0.5);
+  float density  = texture2D(uNoiseTexture, densityUV).r;
+  float nebulaMask = smoothstep(0.22, 0.65, density);
+
+  vAlpha = smoothstep(80.0, 5.0, dist) * (0.3 + aRandom.z * 0.7) * nebulaMask;
 
   // Velocity-based color shift
   float velFactor = abs(uScrollVelocity) * 2.0;

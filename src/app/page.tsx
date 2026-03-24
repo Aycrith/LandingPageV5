@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { LoadingScreen } from "@/dom/LoadingScreen";
 import { DOMLayer } from "@/dom/DOMLayer";
 import { ScrollWrapper } from "@/dom/ScrollWrapper";
+import { AudioManager } from "@/dom/AudioManager";
 
 const Experience = dynamic(() => import("@/canvas/Experience"), {
   ssr: false,
@@ -19,6 +20,7 @@ export default function Home() {
       <ScrollWrapper>
         <DOMLayer />
       </ScrollWrapper>
+      <AudioManager />
     </>
   );
 }

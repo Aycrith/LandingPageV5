@@ -1,9 +1,11 @@
 "use client";
 
 import { useFrame } from "@react-three/fiber";
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, Suspense } from "react";
 import * as THREE from "three";
+import { Environment } from "@react-three/drei";
 import { useScrollStore } from "@/stores/scrollStore";
+import { useCapsStore } from "@/stores/capsStore";
 import { ParticleField } from "./particles/ParticleField";
 import { SkyBox } from "./environment/SkyBox";
 import { Act1Emergence } from "./acts/Act1Emergence";
@@ -38,12 +40,8 @@ export function SceneManager() {
   const currentFog = useMemo(() => new THREE.Color(), []);
   const currentAccent = useMemo(() => new THREE.Color(), []);
 
-  // Track act state for rendering
-  const actState = useRef({ activeAct: 0, actProgress: 0 });
-
   useFrame(() => {
     const { activeAct, actProgress } = useScrollStore.getState();
-    actState.current = { activeAct, actProgress };
 
     const nextAct = Math.min(activeAct + 1, ACT_COLORS.length - 1);
     const t = actProgress;
@@ -78,6 +76,11 @@ export function SceneManager() {
   // Use Zustand subscribe for React rendering (acts need visibility)
   const activeAct = useScrollStore((s) => s.activeAct);
   const actProgress = useScrollStore((s) => s.actProgress);
+  const caps = useCapsStore((s) => s.caps);
+
+  const renderRange = caps?.tier === "high" ? 1 : 0;
+  const shouldRenderAct = (actIndex: number): boolean =>
+    Math.abs(activeAct - actIndex) <= renderRange;
 
   return (
     <>
@@ -100,30 +103,49 @@ export function SceneManager() {
       {/* Procedural skybox */}
       <SkyBox />
 
+      {/* HDRI environment — IBL / reflections for all PBR materials */}
+      <Suspense fallback={null}>
+        {caps?.tier === "high" ? (
+          <Environment files="/env/hdri/kloppenheim_07_4k.exr" background={false} />
+        ) : caps?.tier === "medium" ? (
+          <Environment preset="city" background={false} />
+        ) : null}
+      </Suspense>
+
       {/* Ambient particle field — always present */}
-      <ParticleField />
+      {caps?.tier === "low" ? null : <ParticleField />}
 
       {/* Act scenes — mount ±1 from active for smooth transitions */}
-      <Act1Emergence
-        progress={activeAct === 0 ? actProgress : 0}
-        visible={activeAct <= 1}
-      />
-      <Act2Structure
-        progress={activeAct === 1 ? actProgress : activeAct > 1 ? 1 : 0}
-        visible={Math.abs(activeAct - 1) <= 1}
-      />
-      <Act3Flow
-        progress={activeAct === 2 ? actProgress : activeAct > 2 ? 1 : 0}
-        visible={Math.abs(activeAct - 2) <= 1}
-      />
-      <Act4Quantum
-        progress={activeAct === 3 ? actProgress : activeAct > 3 ? 1 : 0}
-        visible={Math.abs(activeAct - 3) <= 1}
-      />
-      <Act5Convergence
-        progress={activeAct === 4 ? actProgress : 0}
-        visible={activeAct >= 3}
-      />
+      {shouldRenderAct(0) ? (
+        <Act1Emergence
+          progress={activeAct === 0 ? actProgress : 0}
+          visible={true}
+        />
+      ) : null}
+      {shouldRenderAct(1) ? (
+        <Act2Structure
+          progress={activeAct === 1 ? actProgress : activeAct > 1 ? 1 : 0}
+          visible={true}
+        />
+      ) : null}
+      {shouldRenderAct(2) ? (
+        <Act3Flow
+          progress={activeAct === 2 ? actProgress : activeAct > 2 ? 1 : 0}
+          visible={true}
+        />
+      ) : null}
+      {shouldRenderAct(3) ? (
+        <Act4Quantum
+          progress={activeAct === 3 ? actProgress : activeAct > 3 ? 1 : 0}
+          visible={true}
+        />
+      ) : null}
+      {shouldRenderAct(4) ? (
+        <Act5Convergence
+          progress={activeAct === 4 ? actProgress : 0}
+          visible={true}
+        />
+      ) : null}
     </>
   );
 }

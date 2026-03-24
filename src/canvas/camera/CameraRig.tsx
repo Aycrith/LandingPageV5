@@ -1,140 +1,156 @@
 "use client";
 
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useScrollStore } from "@/stores/scrollStore";
+import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useMouseParallax } from "@/hooks/useMouseParallax";
+import { ACT_VIEWPORT_PROFILES } from "../viewportProfiles";
+import { tupleToVector3 } from "@/lib/scene";
 
-// Camera waypoints per act: [position, lookAt, fov]
-const ACT_CAMERAS: Array<{
-  positions: THREE.Vector3[];
-  lookAts: THREE.Vector3[];
-  fovs: number[];
-}> = [
-  // Act 1: Emergence — tight on center, pull back
-  {
-    positions: [
-      new THREE.Vector3(0, 0, 3),
-      new THREE.Vector3(0, 0.5, 6),
-      new THREE.Vector3(0, 1, 10),
-    ],
-    lookAts: [
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-    ],
-    fovs: [40, 45, 50],
-  },
-  // Act 2: Structure — orbital sweep
-  {
-    positions: [
-      new THREE.Vector3(0, 1, 10),
-      new THREE.Vector3(6, 2, 6),
-      new THREE.Vector3(0, 3, 8),
-    ],
-    lookAts: [
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-    ],
-    fovs: [50, 48, 52],
-  },
-  // Act 3: Flow — slow drift
-  {
-    positions: [
-      new THREE.Vector3(0, 3, 8),
-      new THREE.Vector3(-2, 1, 7),
-      new THREE.Vector3(0, 0, 9),
-    ],
-    lookAts: [
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, -1, 0),
-      new THREE.Vector3(0, 0, 0),
-    ],
-    fovs: [52, 55, 50],
-  },
-  // Act 4: Quantum — dynamic, FOV shifts
-  {
-    positions: [
-      new THREE.Vector3(0, 0, 9),
-      new THREE.Vector3(4, -2, 5),
-      new THREE.Vector3(-3, 2, 7),
-    ],
-    lookAts: [
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-    ],
-    fovs: [50, 60, 45],
-  },
-  // Act 5: Convergence — slow push in
-  {
-    positions: [
-      new THREE.Vector3(-3, 2, 7),
-      new THREE.Vector3(0, 0.5, 5),
-      new THREE.Vector3(0, 0, 2),
-    ],
-    lookAts: [
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 0, 0),
-    ],
-    fovs: [45, 42, 38],
-  },
-];
+const STARTUP_PROFILE = ACT_VIEWPORT_PROFILES[0];
 
 export function CameraRig() {
   const { camera } = useThree();
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const mouse = useMouseParallax();
-  const targetPos = useRef(new THREE.Vector3());
-  const targetLookAt = useRef(new THREE.Vector3());
-  const currentPos = useRef(new THREE.Vector3(0, 0, 8));
-  const currentLookAt = useRef(new THREE.Vector3(0, 0, 0));
+  const targetPos = useRef(
+    tupleToVector3(STARTUP_PROFILE.previewCamera.position)
+  );
+  const targetLookAt = useRef(
+    tupleToVector3(STARTUP_PROFILE.previewCamera.lookAt)
+  );
+  const currentPos = useRef(
+    tupleToVector3(STARTUP_PROFILE.previewCamera.position)
+  );
+  const currentLookAt = useRef(
+    tupleToVector3(STARTUP_PROFILE.previewCamera.lookAt)
+  );
+  const startupSettlingStartedAt = useRef<number | null>(null);
+  const startupSequenceComplete = useRef(false);
 
   const curves = useMemo(() => {
-    return ACT_CAMERAS.map((act) => ({
-      posCurve: new THREE.CatmullRomCurve3(act.positions),
-      lookCurve: new THREE.CatmullRomCurve3(act.lookAts),
-      fovs: act.fovs,
+    return ACT_VIEWPORT_PROFILES.map((profile) => ({
+      posCurve: new THREE.CatmullRomCurve3(
+        profile.cameraPath.positions.map((point) => tupleToVector3(point))
+      ),
+      lookCurve: new THREE.CatmullRomCurve3(
+        profile.cameraPath.lookAts.map((point) => tupleToVector3(point))
+      ),
+      fovs: profile.cameraPath.fovs,
     }));
   }, []);
 
-  useFrame((_, delta) => {
+  const startupPreview = useMemo(
+    () => ({
+      position: tupleToVector3(STARTUP_PROFILE.previewCamera.position),
+      lookAt: tupleToVector3(STARTUP_PROFILE.previewCamera.lookAt),
+      fov: STARTUP_PROFILE.previewCamera.fov,
+    }),
+    []
+  );
+
+  const startupSettle = useMemo(
+    () => ({
+      position: tupleToVector3(STARTUP_PROFILE.settleCamera.position),
+      lookAt: tupleToVector3(STARTUP_PROFILE.settleCamera.lookAt),
+      fov: STARTUP_PROFILE.settleCamera.fov,
+    }),
+    []
+  );
+
+  useEffect(() => {
+    if (camera instanceof THREE.PerspectiveCamera) {
+      cameraRef.current = camera;
+      const nextCamera = cameraRef.current;
+      nextCamera.position.copy(startupPreview.position);
+      nextCamera.lookAt(startupPreview.lookAt);
+      nextCamera.fov = startupPreview.fov;
+      nextCamera.updateProjectionMatrix();
+    }
+  }, [camera, startupPreview]);
+
+  useFrame((state, delta) => {
+    const perspCam = cameraRef.current;
+    if (!perspCam) return;
+
     const { activeAct, actProgress } = useScrollStore.getState();
+    const startupState = useSceneLoadStore.getState();
     const act = curves[activeAct];
     if (!act) return;
 
-    const t = Math.max(0, Math.min(1, actProgress));
+    const t = THREE.MathUtils.clamp(actProgress, 0, 1);
+    let targetFov = act.fovs[0];
+    let allowParallax = true;
 
-    // Get target from spline
-    act.posCurve.getPoint(t, targetPos.current);
-    act.lookCurve.getPoint(t, targetLookAt.current);
+    if (activeAct === 0 && !startupSequenceComplete.current) {
+      allowParallax = startupState.stableFrameReady;
 
-    // Add mouse parallax offset (subtle)
-    targetPos.current.x += mouse.current.x * 0.3;
-    targetPos.current.y += mouse.current.y * 0.15;
+      if (!startupState.stableFrameReady) {
+        targetPos.current.copy(startupPreview.position);
+        targetLookAt.current.copy(startupPreview.lookAt);
+        targetFov = startupPreview.fov;
+      } else {
+        if (startupSettlingStartedAt.current === null) {
+          startupSettlingStartedAt.current = state.clock.elapsedTime;
+        }
 
-    // Smooth interpolation
-    const lerpSpeed = 1 - Math.pow(0.001, delta);
+        const settleElapsedMs =
+          (state.clock.elapsedTime - startupSettlingStartedAt.current) * 1000;
+        const settleT = THREE.MathUtils.clamp(
+          settleElapsedMs / STARTUP_PROFILE.fxLayerBehavior.settleDurationMs,
+          0,
+          1
+        );
+        const easedT = THREE.MathUtils.smootherstep(settleT, 0, 1);
+
+        targetPos.current
+          .copy(startupPreview.position)
+          .lerp(startupSettle.position, easedT);
+        targetLookAt.current
+          .copy(startupPreview.lookAt)
+          .lerp(startupSettle.lookAt, easedT);
+        targetFov = THREE.MathUtils.lerp(
+          startupPreview.fov,
+          startupSettle.fov,
+          easedT
+        );
+
+        if (settleT >= 1) {
+          startupSequenceComplete.current = true;
+        }
+      }
+    } else {
+      startupSequenceComplete.current = true;
+      act.posCurve.getPoint(t, targetPos.current);
+      act.lookCurve.getPoint(t, targetLookAt.current);
+
+      const fovIndex = Math.min(
+        Math.floor(t * (act.fovs.length - 1)),
+        act.fovs.length - 2
+      );
+      const fovT = t * (act.fovs.length - 1) - fovIndex;
+      targetFov = THREE.MathUtils.lerp(
+        act.fovs[fovIndex],
+        act.fovs[fovIndex + 1],
+        fovT
+      );
+    }
+
+    if (allowParallax) {
+      targetPos.current.x += mouse.current.x * 0.3;
+      targetPos.current.y += mouse.current.y * 0.15;
+    }
+
+    const lerpBase = startupSequenceComplete.current ? 0.001 : 0.0004;
+    const lerpSpeed = 1 - Math.pow(lerpBase, delta);
+
     currentPos.current.lerp(targetPos.current, lerpSpeed);
     currentLookAt.current.lerp(targetLookAt.current, lerpSpeed);
 
-    camera.position.copy(currentPos.current);
-    camera.lookAt(currentLookAt.current);
-
-    // FOV interpolation
-    const perspCam = camera as THREE.PerspectiveCamera;
-    const fovIndex = Math.min(
-      Math.floor(t * (act.fovs.length - 1)),
-      act.fovs.length - 2
-    );
-    const fovT = (t * (act.fovs.length - 1)) - fovIndex;
-    const targetFov = THREE.MathUtils.lerp(
-      act.fovs[fovIndex],
-      act.fovs[fovIndex + 1],
-      fovT
-    );
+    perspCam.position.copy(currentPos.current);
+    perspCam.lookAt(currentLookAt.current);
     perspCam.fov = THREE.MathUtils.lerp(perspCam.fov, targetFov, lerpSpeed);
     perspCam.updateProjectionMatrix();
   });
