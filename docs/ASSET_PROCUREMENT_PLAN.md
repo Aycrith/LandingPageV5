@@ -1,6 +1,6 @@
 # LandingPageV5 — Asset Procurement Plan (Zero-Cost, CC0-First)
 
-- **Status**: Ready for execution
+- **Status**: Completed
 - **Created**: 2026-03-23
 - **Scope**: HDRI, ambient audio, PBR maps, volumetric texture seed, OG social image
 - **Budget**: $0
@@ -40,7 +40,7 @@ Acquire and validate production-ready assets for the existing Next.js + React Th
 
 - Act 1: Ominous Rumble — https://freesound.org/people/steaq/sounds/593785/
 - Act 2: Sci-fi Ambient Drone — https://freesound.org/people/LookIMadeAThing/sounds/534018/
-- Act 3: Ambient Drone — https://freesound.org/people/CVLTIV8R/sounds/799344/
+- Act 3: Simple Dm Minor Pad Drone [loop] —  https://freesound.org/people/cabled_mess/sounds/366013/
 - Act 4: Light Ambient Glitching Soundscape — https://freesound.org/people/bassimat/sounds/840935/
 - Act 5: Strings and Drums — https://freesound.org/people/BuytheField/sounds/465294/
 

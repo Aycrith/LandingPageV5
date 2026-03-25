@@ -4,7 +4,7 @@ import { useFrame } from "@react-three/fiber";
 import { useRef, useMemo, Suspense } from "react";
 import * as THREE from "three";
 import { Environment } from "@react-three/drei";
-import { useScrollStore, NUM_ACTS } from "@/stores/scrollStore";
+import { useScrollStore } from "@/stores/scrollStore";
 import { useCapsStore } from "@/stores/capsStore";
 import { ParticleField } from "./particles/ParticleField";
 import { SkyBox } from "./environment/SkyBox";
@@ -43,18 +43,18 @@ export function SceneManager() {
   useFrame(() => {
     const { activeAct, actProgress } = useScrollStore.getState();
 
-    // Wrap-aware next act (Convergence → Emergence)
-    const nextAct = (activeAct + 1) % NUM_ACTS;
+    const nextAct = Math.min(activeAct + 1, ACT_COLORS.length - 1);
     const t = actProgress;
 
     // Interpolate fog
     currentFog.copy(fogColors[activeAct]).lerp(fogColors[nextAct], t);
     if (fogRef.current) {
       fogRef.current.color.copy(currentFog);
-      const baseDensity = 0.006;
-      const currentDensity = baseDensity + activeAct * 0.001;
-      const nextDensity = baseDensity + nextAct * 0.001;
-      fogRef.current.density = THREE.MathUtils.lerp(currentDensity, nextDensity, t);
+      fogRef.current.density = THREE.MathUtils.lerp(
+        0.006 + activeAct * 0.001,
+        0.006 + nextAct * 0.001,
+        t
+      );
     }
 
     // Interpolate ambient
@@ -78,18 +78,9 @@ export function SceneManager() {
   const actProgress = useScrollStore((s) => s.actProgress);
   const caps = useCapsStore((s) => s.caps);
 
-  // Render ±1 from active for smooth transitions.
-  // Wrap-around (Act5↔Act0) is handled by camera/color interpolation only —
-  // act geometry does NOT wrap to avoid overlapping scenes.
   const renderRange = caps?.tier === "high" ? 1 : 0;
   const shouldRenderAct = (actIndex: number): boolean =>
     Math.abs(activeAct - actIndex) <= renderRange;
-
-  /** Compute act progress — linear, no wrap */
-  const getActProgress = (actIndex: number): number => {
-    if (activeAct === actIndex) return actProgress;
-    return activeAct > actIndex ? 1 : 0;
-  };
 
   return (
     <>
@@ -124,34 +115,34 @@ export function SceneManager() {
       {/* Ambient particle field — always present */}
       {caps?.tier === "low" ? null : <ParticleField />}
 
-      {/* Act scenes — continuously visible neighbors for seamless metamorphic transitions */}
+      {/* Act scenes — mount ±1 from active for smooth transitions */}
       {shouldRenderAct(0) ? (
         <Act1Emergence
-          progress={getActProgress(0)}
+          progress={activeAct === 0 ? actProgress : 0}
           visible={true}
         />
       ) : null}
       {shouldRenderAct(1) ? (
         <Act2Structure
-          progress={getActProgress(1)}
+          progress={activeAct === 1 ? actProgress : activeAct > 1 ? 1 : 0}
           visible={true}
         />
       ) : null}
       {shouldRenderAct(2) ? (
         <Act3Flow
-          progress={getActProgress(2)}
+          progress={activeAct === 2 ? actProgress : activeAct > 2 ? 1 : 0}
           visible={true}
         />
       ) : null}
       {shouldRenderAct(3) ? (
         <Act4Quantum
-          progress={getActProgress(3)}
+          progress={activeAct === 3 ? actProgress : activeAct > 3 ? 1 : 0}
           visible={true}
         />
       ) : null}
       {shouldRenderAct(4) ? (
         <Act5Convergence
-          progress={getActProgress(4)}
+          progress={activeAct === 4 ? actProgress : 0}
           visible={true}
         />
       ) : null}

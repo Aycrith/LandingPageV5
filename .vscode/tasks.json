@@ -10,6 +10,15 @@
 				"dev"
 			],
 			"isBackground": true
+		},
+		{
+			"type": "npm",
+			"script": "start",
+			"problemMatcher": [
+				"$eslint-compact"
+			],
+			"label": "npm: start",
+			"detail": "next start"
 		}
 	]
 }

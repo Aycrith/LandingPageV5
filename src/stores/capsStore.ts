@@ -2,6 +2,14 @@ import { create } from "zustand";
 
 export type QualityTier = "high" | "medium" | "low";
 
+export interface Budgets {
+  fps: number;
+  drawCalls: number;
+  textureMemoryMB: number;
+  loadTimeMs: number;
+  frameTimeMs: number;
+}
+
 export interface RuntimeCaps {
   tier: QualityTier;
   isMobile: boolean;
@@ -11,6 +19,7 @@ export interface RuntimeCaps {
   enablePostProcessing: boolean;
   dpr: [number, number];
   prefersReducedMotion: boolean;
+  budgets: Budgets;
 }
 
 interface CapsState {
@@ -25,25 +34,46 @@ export const useCapsStore = create<CapsState>((set) => ({
 
 const QUALITY_PROFILES: Record<
   QualityTier,
-  Pick<RuntimeCaps, "maxParticles" | "enableShadows" | "enablePostProcessing" | "dpr">
+  Pick<RuntimeCaps, "maxParticles" | "enableShadows" | "enablePostProcessing" | "dpr" | "budgets">
 > = {
   high: {
-    maxParticles: 18000,
+    maxParticles: 50000,
     enableShadows: true,
     enablePostProcessing: true,
     dpr: [1, 1.15],
+    budgets: {
+      fps: 60,
+      drawCalls: 150,
+      textureMemoryMB: 256,
+      loadTimeMs: 5000,
+      frameTimeMs: 16.6,
+    },
   },
   medium: {
-    maxParticles: 9000,
+    maxParticles: 18000,
     enableShadows: false,
     enablePostProcessing: false,
     dpr: [0.9, 1],
+    budgets: {
+      fps: 60,
+      drawCalls: 100,
+      textureMemoryMB: 128,
+      loadTimeMs: 4000,
+      frameTimeMs: 16.6,
+    },
   },
   low: {
-    maxParticles: 2500,
+    maxParticles: 5000,
     enableShadows: false,
     enablePostProcessing: false,
     dpr: [0.75, 0.9],
+    budgets: {
+      fps: 30,
+      drawCalls: 50,
+      textureMemoryMB: 64,
+      loadTimeMs: 6000,
+      frameTimeMs: 33.3,
+    },
   },
 };
 
@@ -61,6 +91,7 @@ function buildCaps(
     enableShadows: profile.enableShadows,
     enablePostProcessing: profile.enablePostProcessing,
     dpr: profile.dpr,
+    budgets: profile.budgets,
   };
 }
 
@@ -76,6 +107,13 @@ function readSafeModeFlag(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Release a temporary WebGL context so it doesn't count against the browser limit */
+function releaseProbeContext(gl: WebGL2RenderingContext | null) {
+  if (!gl) return;
+  const ext = gl.getExtension("WEBGL_lose_context");
+  if (ext) ext.loseContext();
 }
 
 /** Detect GPU capabilities and set quality tier */
@@ -103,10 +141,21 @@ export function detectCapabilities(): RuntimeCaps {
   };
 
   if (process.env.NODE_ENV !== "production") {
+    // In dev, allow test parameters via URL
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const forceTier = urlParams.get("forceTier") as QualityTier | null;
+      if (forceTier && ["high", "medium", "low"].includes(forceTier)) {
+        releaseProbeContext(gl);
+        return buildCaps(forceTier, meta);
+      }
+    }
+    releaseProbeContext(gl);
     return buildCaps("low", meta);
   }
 
   if (readSafeModeFlag()) {
+    releaseProbeContext(gl);
     return buildCaps("low", meta);
   }
 
@@ -175,6 +224,7 @@ export function detectCapabilities(): RuntimeCaps {
     }
   }
 
+  releaseProbeContext(gl);
   return buildCaps(tier, meta);
 }
 

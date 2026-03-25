@@ -8,9 +8,11 @@ interface SceneLoadState {
   startupStartedAt: number;
   criticalAssets: Record<StartupCriticalAsset, boolean>;
   stableFrameReady: boolean;
+  hasFallbackTriggered: boolean;
   resetStartup: () => void;
   markCriticalAssetReady: (asset: StartupCriticalAsset) => void;
   markStableFrameReady: () => void;
+  markFallbackTriggered: () => void;
 }
 
 function buildInitialAssetState(): Record<StartupCriticalAsset, boolean> {
@@ -27,11 +29,13 @@ export const useSceneLoadStore = create<SceneLoadState>((set) => ({
   startupStartedAt: Date.now(),
   criticalAssets: buildInitialAssetState(),
   stableFrameReady: false,
+  hasFallbackTriggered: false,
   resetStartup: () =>
     set({
       startupStartedAt: Date.now(),
       criticalAssets: buildInitialAssetState(),
       stableFrameReady: false,
+      hasFallbackTriggered: false,
     }),
   markCriticalAssetReady: (asset) =>
     set((state) => ({
@@ -42,15 +46,21 @@ export const useSceneLoadStore = create<SceneLoadState>((set) => ({
     })),
   markStableFrameReady: () =>
     set((state) =>
-      state.stableFrameReady ? state : { stableFrameReady: true }
+      state.stableFrameReady ? {} : { stableFrameReady: true }
+    ),
+  markFallbackTriggered: () =>
+    set((state) =>
+      state.hasFallbackTriggered ? {} : { hasFallbackTriggered: true, stableFrameReady: true }
     ),
 }));
 
 export function areCriticalAssetsReady(state: SceneLoadState): boolean {
+  if (state.hasFallbackTriggered) return true;
   return STARTUP_CRITICAL_ASSETS.every((asset) => state.criticalAssets[asset]);
 }
 
 export function getSceneStartupProgress(state: SceneLoadState): number {
+  if (state.hasFallbackTriggered) return 1;
   const loadedAssets = STARTUP_CRITICAL_ASSETS.filter(
     (asset) => state.criticalAssets[asset]
   ).length;
