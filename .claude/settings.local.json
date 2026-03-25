@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(for d:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/camer/DEVNEW/**)",
+      "Bash(done)",
+      "Bash(ls C:/Users/camer/DEVNEW/LandingPageV5/*.json C:/Users/camer/DEVNEW/LandingPageV5/eslint*)"
+    ]
+  }
+}
