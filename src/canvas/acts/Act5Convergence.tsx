@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, Suspense } from "react";
+import { useRef, useMemo, Suspense, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -13,6 +13,8 @@ import {
   useSceneBounds,
   useStableSceneClone,
 } from "@/lib/scene";
+import { WarpDriveBackground } from "@/canvas/environment/WarpDriveBackground";
+import { ShaderLinesField } from "@/canvas/environment/ShaderLinesField";
 
 interface ActProps {
   progress: number;
@@ -45,7 +47,12 @@ function BlackHoleModel({ progress }: { progress: number }) {
   useFrame((state) => {
     if (!groupRef.current) return;
     groupRef.current.rotation.y = state.clock.elapsedTime * 0.1;
-    const desiredScale = Math.min(progress / 0.3, 1) * 0.02;
+    const desiredScale =
+      THREE.MathUtils.lerp(
+        ACT_PROFILE.heroModelBehavior.baseScale,
+        ACT_PROFILE.heroModelBehavior.maxScale,
+        Math.min(progress / 0.3, 1)
+      );
     const appliedScale = Math.min(desiredScale, fittedMaxScale);
     const camera = state.camera as THREE.PerspectiveCamera;
 
@@ -80,34 +87,43 @@ export function Act5Convergence({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
   const vortexRef = useRef<THREE.Mesh>(null);
   const vortexMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const singularityRef = useRef<THREE.Mesh>(null);
   const innerCoreRef = useRef<THREE.Mesh>(null);
   const innerCoreMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
   const trailsRef = useRef<THREE.InstancedMesh>(null);
   const diskRef = useRef<THREE.Mesh>(null);
   const secondaryDiskRef = useRef<THREE.Mesh>(null);
 
-  const trailCount = 150;
+  const trailCount = 96;
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   const trailData = useMemo(() => {
     return Array.from({ length: trailCount }, (_, i) => ({
-      startRadius: 5 + seededUnit(i * 19 + 1) * 10,
-      height: seededUnit(i * 19 + 2) * 10 - 5,
-      speed: 0.2 + seededUnit(i * 19 + 3) * 0.7,
+      startRadius: 4 + seededUnit(i * 19 + 1) * 7,
+      height: seededUnit(i * 19 + 2) * 7 - 3.5,
+      speed: 0.18 + seededUnit(i * 19 + 3) * 0.46,
       phase: (i / trailCount) * Math.PI * 2,
-      scale: 0.015 + seededUnit(i * 19 + 4) * 0.05,
-      spiralTightness: 0.3 + seededUnit(i * 19 + 5) * 2.0,
+      scale: 0.012 + seededUnit(i * 19 + 4) * 0.03,
+      spiralTightness: 0.4 + seededUnit(i * 19 + 5) * 1.2,
     }));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      useViewportAuditStore.getState().clearHeroModel("act5-black-hole");
+      useViewportAuditStore.getState().clearFxLayer("act5-inner-core");
+    };
   }, []);
 
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
+    groupRef.current.position.set(0, 0.8, -0.55);
 
     if (vortexRef.current) {
       const pulse = Math.sin(t * 2) * 0.02;
       const scale =
-        THREE.MathUtils.lerp(0.22, ACT_PROFILE.fxLayerBehavior.coreScaleLimit, progress) +
+        THREE.MathUtils.lerp(0.42, ACT_PROFILE.fxLayerBehavior.coreScaleLimit, progress) +
         pulse;
       vortexRef.current.scale.setScalar(scale);
       vortexRef.current.rotation.y = t * 0.25;
@@ -115,13 +131,17 @@ export function Act5Convergence({ progress, visible }: ActProps) {
     }
 
     if (vortexMaterialRef.current) {
-      vortexMaterialRef.current.emissiveIntensity = 1.4 + progress * 3.2;
+      vortexMaterialRef.current.emissiveIntensity = 0.9 + progress * 2.1;
+    }
+
+    if (singularityRef.current) {
+      singularityRef.current.scale.setScalar(THREE.MathUtils.lerp(0.22, 0.34, progress));
     }
 
     if (innerCoreRef.current) {
       const pulse = Math.sin(t * 2.5) * 0.015;
       innerCoreRef.current.scale.setScalar(
-        THREE.MathUtils.lerp(0.18, 0.28, progress) + pulse
+        THREE.MathUtils.lerp(0.3, 0.46, progress) + pulse
       );
     }
 
@@ -141,13 +161,13 @@ export function Act5Convergence({ progress, visible }: ActProps) {
     if (diskRef.current) {
       diskRef.current.rotation.z = t * 0.3;
       const mat = diskRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = progress * 0.32;
+      mat.opacity = progress * 0.3;
     }
 
     if (secondaryDiskRef.current) {
       secondaryDiskRef.current.rotation.z = -t * 0.18;
       const mat = secondaryDiskRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = progress * 0.18;
+      mat.opacity = progress * 0.12;
     }
 
     if (trailsRef.current) {
@@ -165,8 +185,8 @@ export function Act5Convergence({ progress, visible }: ActProps) {
           Math.sin(spiralAngle) * radius
         );
 
-        const distScale = Math.max(0.15, radius / data.startRadius);
-        dummy.scale.setScalar(data.scale * distScale * (0.5 + progress * 0.5));
+        const distScale = Math.max(0.2, radius / data.startRadius);
+        dummy.scale.setScalar(data.scale * distScale * (0.35 + progress * 0.4));
         dummy.updateMatrix();
         trailsRef.current.setMatrixAt(i, dummy.matrix);
       }
@@ -180,17 +200,25 @@ export function Act5Convergence({ progress, visible }: ActProps) {
 
   return (
     <group ref={groupRef}>
+      <WarpDriveBackground progress={progress} />
+      <ShaderLinesField progress={progress} />
+
       <mesh ref={vortexRef}>
         <icosahedronGeometry args={[1, 5]} />
         <meshStandardMaterial
           ref={vortexMaterialRef}
-          color="#ff7eb3"
+          color="#120712"
           emissive="#ff7eb3"
-          emissiveIntensity={2.2}
-          metalness={1}
-          roughness={0}
+          emissiveIntensity={1.6}
+          metalness={0.95}
+          roughness={0.06}
           toneMapped={false}
         />
+      </mesh>
+
+      <mesh ref={singularityRef}>
+        <sphereGeometry args={[1, 48, 48]} />
+        <meshBasicMaterial color="#020203" toneMapped={false} />
       </mesh>
 
       <mesh ref={innerCoreRef}>
@@ -206,8 +234,8 @@ export function Act5Convergence({ progress, visible }: ActProps) {
         />
       </mesh>
 
-      <mesh ref={diskRef} rotation={[Math.PI / 2.2, 0, 0]}>
-        <ringGeometry args={[1.2, 5, 64, 3]} />
+      <mesh ref={diskRef} rotation={[Math.PI / 2.18, 0.08, 0.04]}>
+        <ringGeometry args={[1.7, 5.9, 96, 3]} />
         <meshBasicMaterial
           color="#ff7eb3"
           transparent
@@ -218,8 +246,8 @@ export function Act5Convergence({ progress, visible }: ActProps) {
         />
       </mesh>
 
-      <mesh ref={secondaryDiskRef} rotation={[Math.PI / 1.8, 0.3, 0.5]}>
-        <ringGeometry args={[1.5, 4, 64, 2]} />
+      <mesh ref={secondaryDiskRef} rotation={[Math.PI / 1.74, 0.3, 0.52]}>
+        <ringGeometry args={[1.4, 4.6, 96, 2]} />
         <meshBasicMaterial
           color="#d0a2ff"
           transparent
@@ -235,7 +263,7 @@ export function Act5Convergence({ progress, visible }: ActProps) {
         <meshBasicMaterial
           color="#ff7eb3"
           transparent
-          opacity={0.85}
+          opacity={0.62}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           toneMapped={false}
@@ -248,22 +276,22 @@ export function Act5Convergence({ progress, visible }: ActProps) {
 
       <pointLight
         color="#ff7eb3"
-        intensity={progress * 32}
-        distance={50}
+        intensity={progress * 24}
+        distance={36}
         decay={2}
       />
       <pointLight
         color="#ffffff"
-        intensity={progress * 8}
-        distance={20}
+        intensity={progress * 5}
+        distance={14}
         decay={2}
       />
       <pointLight
         color="#d0a2ff"
-        intensity={progress * 8}
-        distance={30}
+        intensity={progress * 6}
+        distance={24}
         decay={2}
-        position={[0, 3, 0]}
+        position={[0, 4.2, -1]}
       />
     </group>
   );

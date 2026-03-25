@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, Suspense } from "react";
+import { useRef, useMemo, Suspense, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -8,6 +8,7 @@ import { WireframePulseMaterial } from "@/canvas/materials/WireframePulse";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { seededUnit } from "@/lib/random";
+import { DynamicShaderBg } from "@/canvas/environment/DynamicShaderBg";
 import {
   fitScaleToViewportFill,
   getViewportHeightAtDistance,
@@ -47,11 +48,17 @@ function GlobeModel({ progress }: { progress: number }) {
   useFrame((state) => {
     if (!groupRef.current) return;
     groupRef.current.rotation.y = state.clock.elapsedTime * 0.12;
-    const desiredScale = Math.min(progress / 0.3, 1) * 0.02;
+    const desiredScale =
+      THREE.MathUtils.lerp(
+        ACT_PROFILE.heroModelBehavior.baseScale,
+        ACT_PROFILE.heroModelBehavior.maxScale,
+        Math.min(progress / 0.3, 1)
+      );
     const appliedScale = Math.min(desiredScale, fittedMaxScale);
     const camera = state.camera as THREE.PerspectiveCamera;
 
     groupRef.current.scale.setScalar(appliedScale);
+    groupRef.current.position.set(2.35, 0.15, -0.2);
     groupRef.current.getWorldPosition(worldPosRef.current);
     const distance = worldPosRef.current.distanceTo(camera.position);
     const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
@@ -93,11 +100,13 @@ function SatellitesModel({ progress }: { progress: number }) {
     if (!groupRef.current) return;
     groupRef.current.rotation.y = -state.clock.elapsedTime * 0.08;
     const appear = Math.max(0, (progress - 0.3) / 0.4);
-    groupRef.current.scale.setScalar(Math.min(Math.min(appear, 1) * 0.01, fittedMaxScale));
+    groupRef.current.scale.setScalar(
+      Math.min(Math.min(appear, 1) * 0.014, fittedMaxScale)
+    );
   });
 
   return (
-    <group ref={groupRef} position={[3, 1, -2]}>
+    <group ref={groupRef} position={[4.6, 1.2, -2.8]}>
       <primitive object={sceneClone} />
     </group>
   );
@@ -108,29 +117,37 @@ export function Act2Structure({ progress, visible }: ActProps) {
   const globeRef = useRef<THREE.Mesh>(null);
   const instanceRef = useRef<THREE.InstancedMesh>(null);
 
-  const bodyCount = 32;
+  const bodyCount = 18;
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   const orbits = useMemo(() => {
     return Array.from({ length: bodyCount }, (_, i) => ({
-      radius: 3 + seededUnit(i * 17 + 1) * 5,
-      speed: 0.15 + seededUnit(i * 17 + 2) * 0.35,
+      radius: 2.5 + seededUnit(i * 17 + 1) * 3.8,
+      speed: 0.12 + seededUnit(i * 17 + 2) * 0.22,
       tilt: seededUnit(i * 17 + 3) * Math.PI,
       phase: (i / bodyCount) * Math.PI * 2,
-      scale: 0.08 + seededUnit(i * 17 + 4) * 0.2,
-      yOffset: seededUnit(i * 17 + 5) * 4 - 2,
+      scale: 0.04 + seededUnit(i * 17 + 4) * 0.12,
+      yOffset: seededUnit(i * 17 + 5) * 2.2 - 1.1,
     }));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      useViewportAuditStore.getState().clearHeroModel("act2-globe");
+    };
   }, []);
 
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
+    groupRef.current.position.set(0.9, -0.1, 0);
 
     if (globeRef.current) {
       globeRef.current.rotation.y = t * 0.12;
       globeRef.current.rotation.x = Math.sin(t * 0.08) * 0.1;
       const scaleIn = Math.min(progress / 0.25, 1);
-      globeRef.current.scale.setScalar(scaleIn * 2.2);
+      globeRef.current.scale.setScalar(scaleIn * 1.35);
+      globeRef.current.position.set(2.2, 0.1, 0);
     }
 
     if (instanceRef.current) {
@@ -142,8 +159,8 @@ export function Act2Structure({ progress, visible }: ActProps) {
         const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
 
         dummy.position.set(
-          Math.cos(angle) * orbit.radius * Math.cos(orbit.tilt),
-          orbit.yOffset + Math.sin(t * 0.5 + orbit.phase) * 0.6,
+          2.1 + Math.cos(angle) * orbit.radius * Math.cos(orbit.tilt),
+          orbit.yOffset + Math.sin(t * 0.5 + orbit.phase) * 0.35,
           Math.sin(angle) * orbit.radius
         );
         dummy.scale.setScalar(orbit.scale * appear * fadeOut);
@@ -167,21 +184,11 @@ export function Act2Structure({ progress, visible }: ActProps) {
 
   return (
     <group ref={groupRef}>
+      <DynamicShaderBg progress={progress} />
+
       <mesh ref={globeRef}>
         <icosahedronGeometry args={[2, 4]} />
         <WireframePulseMaterial color="#6dc7ff" pulseSpeed={1.5} />
-      </mesh>
-
-      <mesh rotation={[0, Math.PI / 4, Math.PI / 6]}>
-        <icosahedronGeometry args={[2.3, 2]} />
-        <meshBasicMaterial
-          color="#6dc7ff"
-          wireframe
-          transparent
-          opacity={0.1}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
       </mesh>
 
       <instancedMesh
@@ -193,9 +200,9 @@ export function Act2Structure({ progress, visible }: ActProps) {
         <meshStandardMaterial
           color="#6dc7ff"
           emissive="#6dc7ff"
-          emissiveIntensity={0.3}
+          emissiveIntensity={0.22}
           metalness={0.95}
-          roughness={0.05}
+          roughness={0.18}
         />
       </instancedMesh>
 
@@ -209,10 +216,10 @@ export function Act2Structure({ progress, visible }: ActProps) {
       <pointLight color="#6dc7ff" intensity={10} distance={25} decay={2} />
       <pointLight
         color="#ffffff"
-        intensity={3}
-        distance={15}
+        intensity={2}
+        distance={12}
         decay={2}
-        position={[0, 5, 0]}
+        position={[2.2, 4.4, 0]}
       />
     </group>
   );
@@ -238,12 +245,12 @@ function Rock063Ground({ progress }: { progress: number }) {
 
   useFrame(() => {
     if (matRef.current) {
-      matRef.current.opacity = Math.min(progress / 0.4, 1) * 0.72;
+      matRef.current.opacity = Math.min(progress / 0.4, 1) * 0.34;
     }
   });
 
   return (
-    <mesh rotation-x={-Math.PI / 2} position={[0, -5, 0]}>
+    <mesh rotation-x={-Math.PI / 2} position={[0, -5.2, 0]}>
       <circleGeometry args={[25, 64]} />
       <meshStandardMaterial
         ref={matRef}
@@ -254,7 +261,7 @@ function Rock063Ground({ progress }: { progress: number }) {
         metalness={0}
         transparent
         opacity={0}
-        envMapIntensity={0.8}
+        envMapIntensity={0.45}
         depthWrite={false}
       />
     </mesh>

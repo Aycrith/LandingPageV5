@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, Suspense } from "react";
+import { useRef, useMemo, Suspense, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -15,6 +15,8 @@ import {
   useStableSceneClone,
 } from "@/lib/scene";
 import { useRepeatingTexture } from "@/lib/textures";
+import { GradientBlurBg } from "@/canvas/environment/GradientBlurBg";
+import { DottedWave } from "@/canvas/environment/DottedWave";
 
 interface ActProps {
   progress: number;
@@ -50,10 +52,15 @@ function HologramModel({ progress }: { progress: number }) {
     const camera = state.camera as THREE.PerspectiveCamera;
     groupRef.current.rotation.y = t * 0.2;
     const appear = Math.max(0, (progress - 0.2) / 0.3);
-    const desiredScale = Math.min(appear, 1) * 0.015;
+    const desiredScale =
+      THREE.MathUtils.lerp(
+        ACT_PROFILE.heroModelBehavior.baseScale,
+        ACT_PROFILE.heroModelBehavior.maxScale,
+        Math.min(appear, 1)
+      );
     const appliedScale = Math.min(desiredScale, fittedMaxScale);
     groupRef.current.scale.setScalar(appliedScale);
-    groupRef.current.position.y = Math.sin(t * 0.5) * 0.3 + 2;
+    groupRef.current.position.y = Math.sin(t * 0.5) * 0.18 + 1.45;
 
     groupRef.current.getWorldPosition(worldPosRef.current);
     const distance = worldPosRef.current.distanceTo(camera.position);
@@ -68,7 +75,7 @@ function HologramModel({ progress }: { progress: number }) {
   });
 
   return (
-    <group ref={groupRef} position={[3, 2, -1]}>
+    <group ref={groupRef} position={[2.9, 1.4, -0.85]}>
       <primitive object={sceneClone} />
     </group>
   );
@@ -80,23 +87,23 @@ export function Act3Flow({ progress, visible }: ActProps) {
   const surfacePositions = useRef<Float32Array | null>(null);
   const normalFrameRef = useRef(0);
 
-  const ribbonCount = 10;
+  const ribbonCount = 4;
   const ribbonData = useMemo(() => {
     return Array.from({ length: ribbonCount }, (_, i) => ({
-      radius: 3 + i * 0.5,
-      speed: 0.2 + seededUnit(i * 13 + 1) * 0.25,
-      yOffset: (i - ribbonCount / 2) * 0.6,
+      radius: 1.8 + i * 0.45,
+      speed: 0.15 + seededUnit(i * 13 + 1) * 0.18,
+      yOffset: (i - ribbonCount / 2) * 0.32,
       phase: (i / ribbonCount) * Math.PI * 2,
-      frequency: 1.5 + seededUnit(i * 13 + 2) * 2,
-      amplitude: 0.3 + seededUnit(i * 13 + 3) * 0.7,
+      frequency: 1.2 + seededUnit(i * 13 + 2) * 1.1,
+      amplitude: 0.18 + seededUnit(i * 13 + 3) * 0.32,
     }));
   }, []);
 
   const ribbonGeometries = useMemo(() => {
     return ribbonData.map((data) => {
       const curve = new THREE.CatmullRomCurve3(
-        Array.from({ length: 24 }, (_, i) => {
-          const t = (i / 23) * Math.PI * 2;
+        Array.from({ length: 20 }, (_, i) => {
+          const t = (i / 19) * Math.PI * 2;
           return new THREE.Vector3(
             Math.cos(t) * data.radius,
             data.yOffset + Math.sin(t * data.frequency) * data.amplitude,
@@ -105,15 +112,22 @@ export function Act3Flow({ progress, visible }: ActProps) {
         }),
         true
       );
-      return new THREE.TubeGeometry(curve, 80, 0.02, 4, true);
+      return new THREE.TubeGeometry(curve, 64, 0.016, 4, true);
     });
   }, [ribbonData]);
 
   const planeGeo = useMemo(() => new THREE.PlaneGeometry(18, 18, 96, 96), []);
 
+  useEffect(() => {
+    return () => {
+      useViewportAuditStore.getState().clearHeroModel("act3-hologram");
+    };
+  }, []);
+
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
+    groupRef.current.position.set(0.6, -2.6, 0);
 
     if (surfaceRef.current) {
       const geo = surfaceRef.current.geometry;
@@ -144,7 +158,7 @@ export function Act3Flow({ progress, visible }: ActProps) {
       const scaleIn = Math.min(progress / 0.25, 1);
       surfaceRef.current.scale.setScalar(scaleIn);
       const mat = surfaceRef.current.material as THREE.MeshStandardMaterial;
-      mat.opacity = scaleIn * 0.5;
+      mat.opacity = scaleIn * 0.34;
     }
 
     const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
@@ -154,16 +168,24 @@ export function Act3Flow({ progress, visible }: ActProps) {
   if (!visible) return null;
 
   return (
-    <group ref={groupRef} rotation={[-0.2, 0, 0]} position={[0, -2, 0]}>
-      <mesh ref={surfaceRef} geometry={planeGeo} rotation={[-Math.PI / 2, 0, 0]}>
+    <group ref={groupRef} rotation={[-0.14, 0, 0]} position={[0, -2.6, 0]}>
+      <GradientBlurBg progress={progress} />
+      <DottedWave progress={progress} color="#d0a2ff" yOffset={-1.8} />
+
+      <mesh
+        ref={surfaceRef}
+        geometry={planeGeo}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[1.8, -0.45, 0]}
+      >
         <meshStandardMaterial
           color="#d0a2ff"
           emissive="#d0a2ff"
-          emissiveIntensity={0.25}
+          emissiveIntensity={0.18}
           metalness={0.8}
-          roughness={0.2}
+          roughness={0.28}
           transparent
-          opacity={0.5}
+          opacity={0.32}
           side={THREE.DoubleSide}
         />
       </mesh>
@@ -183,24 +205,24 @@ export function Act3Flow({ progress, visible }: ActProps) {
 
       <Metal049ASurface progress={progress} />
 
-      <mesh position={[3, 0.5, -1]}>
+      <mesh position={[2.9, 0.4, -0.9]}>
         <cylinderGeometry args={[0.3, 0.5, 1, 16]} />
         <HologramMaterial color="#d0a2ff" />
       </mesh>
 
       <pointLight
         color="#d0a2ff"
-        intensity={progress * 15}
-        distance={25}
+        intensity={progress * 10}
+        distance={20}
         decay={2}
-        position={[0, 3, 0]}
+        position={[2.6, 3.2, 0]}
       />
       <pointLight
         color="#6dc7ff"
-        intensity={progress * 5}
-        distance={15}
+        intensity={progress * 4}
+        distance={12}
         decay={2}
-        position={[3, 4, -1]}
+        position={[2.8, 3.8, -1]}
       />
     </group>
   );
@@ -222,7 +244,7 @@ function FlowRibbon({
     meshRef.current.rotation.y =
       state.clock.elapsedTime * data.speed + data.phase;
     const mat = meshRef.current.material as THREE.MeshBasicMaterial;
-    mat.opacity = Math.min(progress / 0.3, 1) * 0.4;
+    mat.opacity = Math.min(progress / 0.3, 1) * 0.22;
   });
 
   return (

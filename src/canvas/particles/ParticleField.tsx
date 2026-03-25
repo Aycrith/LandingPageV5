@@ -10,6 +10,7 @@ import vertexShader from "@/canvas/shaders/particles.vert.glsl";
 import fragmentShader from "@/canvas/shaders/particles.frag.glsl";
 import { seededUnit } from "@/lib/random";
 import { useSharedTexture } from "@/lib/textures";
+import type { AmbientParticleMode } from "@/canvas/viewportProfiles";
 
 const ACT_ACCENT_COLORS = [
   new THREE.Color("#7ef2c6"),
@@ -19,7 +20,11 @@ const ACT_ACCENT_COLORS = [
   new THREE.Color("#ff7eb3"),
 ];
 
-export function ParticleField() {
+interface ParticleFieldProps {
+  mode: AmbientParticleMode;
+}
+
+export function ParticleField({ mode }: ParticleFieldProps) {
   const meshRef = useRef<THREE.Points>(null);
   const materialRef = useRef<THREE.ShaderMaterial>(null);
   const mouse = useMouseParallax();
@@ -62,6 +67,8 @@ export function ParticleField() {
       uMouse: { value: new THREE.Vector2(0, 0) },
       uActProgress: { value: 0 },
       uAccentColor: { value: new THREE.Color("#7ef2c6") },
+      uOpacityScale: { value: 0.7 },
+      uSizeScale: { value: 1 },
       // 1×1 white fallback — replaced once the noise texture finishes loading
       uNoiseTexture: {
         value: (() => {
@@ -109,6 +116,10 @@ export function ParticleField() {
       .copy(ACT_ACCENT_COLORS[activeAct])
       .lerp(ACT_ACCENT_COLORS[nextAct], actProgress);
     materialRef.current.uniforms.uAccentColor.value.copy(blendedColor);
+    materialRef.current.uniforms.uOpacityScale.value =
+      mode === "dense" ? 0.72 : 0.34;
+    materialRef.current.uniforms.uSizeScale.value =
+      mode === "dense" ? 1.05 : 0.82;
   });
 
   return (

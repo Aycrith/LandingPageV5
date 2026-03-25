@@ -1,49 +1,85 @@
 "use client";
 
-import { EffectComposer, Bloom, Vignette, ChromaticAberration } from "@react-three/postprocessing";
+import { useMemo } from "react";
+import {
+  Bloom,
+  ChromaticAberration,
+  EffectComposer,
+  Vignette,
+} from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
-import { useCapsStore } from "@/stores/capsStore";
 import * as THREE from "three";
-
-function HighQualityEffects() {
-  return (
-    <EffectComposer multisampling={0}>
-      <Bloom
-        luminanceThreshold={0.8}
-        luminanceSmoothing={0.025}
-        intensity={1.5}
-        mipmapBlur
-      />
-      <Vignette offset={0.1} darkness={1.2} blendFunction={BlendFunction.NORMAL} />
-      <ChromaticAberration
-        offset={new THREE.Vector2(0.002, 0.002)}
-        blendFunction={BlendFunction.NORMAL}
-        radialModulation={false}
-        modulationOffset={0}
-      />
-    </EffectComposer>
-  );
-}
-
-function MediumQualityEffects() {
-  return (
-    <EffectComposer multisampling={0}>
-      <Bloom
-        luminanceThreshold={0.9}
-        luminanceSmoothing={0.025}
-        intensity={0.8}
-        mipmapBlur
-      />
-      <Vignette offset={0.1} darkness={0.8} blendFunction={BlendFunction.NORMAL} />
-    </EffectComposer>
-  );
-}
+import { useCapsStore } from "@/stores/capsStore";
+import { useScrollStore } from "@/stores/scrollStore";
+import { ACT_VIEWPORT_PROFILES } from "../viewportProfiles";
 
 export function PostProcessingStack() {
-  const caps = useCapsStore((s) => s.caps);
+  const caps = useCapsStore((state) => state.caps);
+  const activeAct = useScrollStore((state) => state.activeAct);
 
-  if (!caps || !caps.enablePostProcessing) return null;
+  const profile = ACT_VIEWPORT_PROFILES[activeAct];
+  const tierOverride =
+    caps?.tier != null ? profile.tierOverrides[caps.tier] : undefined;
 
-  if (caps.tier === "high") return <HighQualityEffects />;
-  return <MediumQualityEffects />;
+  const bloomIntensity =
+    profile.postFxProfile.bloomIntensity *
+    (tierOverride?.bloomIntensityMultiplier ?? 1);
+  const bloomThreshold =
+    profile.postFxProfile.bloomThreshold +
+    (tierOverride?.bloomThresholdOffset ?? 0);
+  const vignetteDarkness =
+    profile.postFxProfile.vignetteDarkness *
+    (tierOverride?.vignetteDarknessMultiplier ?? 1);
+  const chromaticOffset =
+    profile.postFxProfile.chromaticOffset *
+    (tierOverride?.chromaticOffsetMultiplier ?? 1);
+
+  const chromaticVector = useMemo(
+    () => new THREE.Vector2(chromaticOffset, chromaticOffset),
+    [chromaticOffset]
+  );
+
+  if (!caps || !caps.enablePostProcessing) {
+    return null;
+  }
+
+  if (chromaticOffset > 0) {
+    return (
+      <EffectComposer multisampling={0}>
+        <Bloom
+          luminanceThreshold={bloomThreshold}
+          luminanceSmoothing={profile.postFxProfile.bloomSmoothing}
+          intensity={bloomIntensity}
+          mipmapBlur
+        />
+        <Vignette
+          offset={profile.postFxProfile.vignetteOffset}
+          darkness={vignetteDarkness}
+          blendFunction={BlendFunction.NORMAL}
+        />
+        <ChromaticAberration
+          offset={chromaticVector}
+          blendFunction={BlendFunction.NORMAL}
+          radialModulation={false}
+          modulationOffset={0}
+        />
+      </EffectComposer>
+    );
+  }
+
+  return (
+    <EffectComposer multisampling={0}>
+      <Bloom
+        luminanceThreshold={bloomThreshold}
+        luminanceSmoothing={profile.postFxProfile.bloomSmoothing}
+        intensity={bloomIntensity}
+        mipmapBlur
+      />
+      <Vignette
+        offset={profile.postFxProfile.vignetteOffset}
+        darkness={vignetteDarkness}
+        blendFunction={BlendFunction.NORMAL}
+      />
+    </EffectComposer>
+  );
 }

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "assets:normalize": "node scripts/convert-paradox-glb.mjs",
-    "audit:viewport": "playwright test tests/viewport-audit.spec.ts"
+    "audit:viewport": "playwright test tests/viewport-audit-visual.spec.ts tests/viewport-audit-stability.spec.ts",
+    "audit:viewport:visual": "playwright test tests/viewport-audit-visual.spec.ts",
+    "audit:viewport:stability": "playwright test tests/viewport-audit-stability.spec.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

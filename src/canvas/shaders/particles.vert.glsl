@@ -4,6 +4,8 @@ uniform vec2 uMouse;
 uniform float uActProgress;
 uniform vec3 uAccentColor;
 uniform sampler2D uNoiseTexture;
+uniform float uOpacityScale;
+uniform float uSizeScale;
 
 attribute vec3 aRandom;
 attribute float aSize;
@@ -118,7 +120,7 @@ void main() {
 
   // Size attenuation
   float sizeFactor = aSize * (200.0 / -mvPosition.z);
-  gl_PointSize = max(sizeFactor, 0.5);
+  gl_PointSize = max(sizeFactor * uSizeScale, 0.5);
 
   // Distance-based alpha
   float dist = -mvPosition.z;
@@ -130,7 +132,11 @@ void main() {
   float density  = texture2D(uNoiseTexture, densityUV).r;
   float nebulaMask = smoothstep(0.22, 0.65, density);
 
-  vAlpha = smoothstep(80.0, 5.0, dist) * (0.3 + aRandom.z * 0.7) * nebulaMask;
+  vAlpha =
+    smoothstep(80.0, 5.0, dist) *
+    (0.3 + aRandom.z * 0.7) *
+    nebulaMask *
+    uOpacityScale;
 
   // Velocity-based color shift
   float velFactor = abs(uScrollVelocity) * 2.0;

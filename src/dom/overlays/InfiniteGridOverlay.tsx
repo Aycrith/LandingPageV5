@@ -3,8 +3,9 @@
 import { useEffect, useRef } from "react";
 import { useCursorStore } from "@/stores/cursorStore";
 import { useScrollStore } from "@/stores/scrollStore";
+import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
 
-const ACT_COLORS = ["#a855f7", "#3b82f6", "#c084fc", "#f59e0b", "#ec4899"];
+const ACT_COLORS = ACT_VIEWPORT_PROFILES.map((profile) => profile.accent);
 
 export function InfiniteGridOverlay() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

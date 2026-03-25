@@ -14,7 +14,6 @@ import {
   useSceneBounds,
   useStableSceneClone,
 } from "@/lib/scene";
-import { seededUnit } from "@/lib/random";
 
 interface ActProps {
   progress: number;
@@ -47,6 +46,9 @@ function DarkStarModel({ progress }: { progress: number }) {
 
   useEffect(() => {
     markCriticalAssetReady("act1-dark-star");
+    return () => {
+      useViewportAuditStore.getState().clearHeroModel("act1-dark-star");
+    };
   }, [markCriticalAssetReady]);
 
   useFrame((state) => {
@@ -96,31 +98,33 @@ export function Act1Emergence({ progress, visible }: ActProps) {
   const coreRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
   const glowMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
-  const ringsRef = useRef<THREE.Group>(null);
+  const accretionPrimaryRef = useRef<THREE.Mesh>(null);
+  const accretionSecondaryRef = useRef<THREE.Mesh>(null);
+  const lensRef = useRef<THREE.Mesh>(null);
 
-  const ringCount = 7;
-  const ringData = useMemo(() => {
-    return Array.from({ length: ringCount }, (_, i) => ({
-      radius: 1.2 + i * 0.6,
-      speed: 0.2 + i * 0.12,
-      tilt: (i * Math.PI) / ringCount + seededUnit(i * 11 + 1) * 0.3,
-      phase: (i * Math.PI * 2) / ringCount,
-    }));
+  useEffect(() => {
+    return () => {
+      useViewportAuditStore.getState().clearFxLayer("act1-glow");
+    };
   }, []);
 
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
 
+    groupRef.current.position.y = -0.2 - progress * 0.45;
+
     if (coreRef.current) {
-      const scale = 0.15 + progress * 1.0;
+      const scale = 0.18 + progress * 1.15;
       const breath = Math.sin(t * 1.5) * 0.03;
       coreRef.current.scale.setScalar(scale * (1 + breath));
+      coreRef.current.rotation.y = t * 0.12;
+      coreRef.current.rotation.x = Math.sin(t * 0.18) * 0.08;
     }
 
     if (glowRef.current) {
       const glowScale = THREE.MathUtils.lerp(
-        0.52,
+        0.46,
         ACT_PROFILE.fxLayerBehavior.coreScaleLimit,
         Math.min(progress / 0.55, 1)
       );
@@ -129,7 +133,7 @@ export function Act1Emergence({ progress, visible }: ActProps) {
 
     if (glowMaterialRef.current) {
       const glowOpacity = THREE.MathUtils.lerp(
-        0.18,
+        0.1,
         ACT_PROFILE.fxLayerBehavior.coreOpacity,
         Math.min(progress / 0.6, 1)
       );
@@ -140,15 +144,26 @@ export function Act1Emergence({ progress, visible }: ActProps) {
       });
     }
 
-    if (ringsRef.current) {
-      ringsRef.current.rotation.y = t * 0.08;
-      ringsRef.current.rotation.z = Math.sin(t * 0.05) * 0.1;
-      ringsRef.current.children.forEach((ring, i) => {
-        ring.rotation.z = t * ringData[i].speed + ringData[i].phase;
-        const ringProgress = Math.max(0, (progress - i * 0.08) / 0.4);
-        const mat = (ring as THREE.Mesh).material as THREE.MeshBasicMaterial;
-        mat.opacity = Math.min(1, ringProgress) * 0.35;
-      });
+    if (accretionPrimaryRef.current) {
+      accretionPrimaryRef.current.rotation.z = t * 0.2;
+      const mat =
+        accretionPrimaryRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = THREE.MathUtils.lerp(0.04, 0.26, Math.min(progress / 0.5, 1));
+      accretionPrimaryRef.current.scale.setScalar(0.96 + progress * 0.22);
+    }
+
+    if (accretionSecondaryRef.current) {
+      accretionSecondaryRef.current.rotation.z = -t * 0.12 + 0.2;
+      const mat =
+        accretionSecondaryRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = THREE.MathUtils.lerp(0.02, 0.12, Math.min(progress / 0.55, 1));
+      accretionSecondaryRef.current.scale.setScalar(0.86 + progress * 0.15);
+    }
+
+    if (lensRef.current) {
+      const mat = lensRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = THREE.MathUtils.lerp(0.04, 0.1, Math.min(progress / 0.55, 1));
+      lensRef.current.scale.setScalar(1 + Math.sin(t * 0.5) * 0.02);
     }
 
     const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
@@ -181,38 +196,61 @@ export function Act1Emergence({ progress, visible }: ActProps) {
         />
       </mesh>
 
+      <mesh ref={lensRef} scale={1.02}>
+        <sphereGeometry args={[1, 24, 24]} />
+        <meshBasicMaterial
+          color="#d7fff1"
+          transparent
+          opacity={0.06}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+
+      <mesh ref={accretionPrimaryRef} rotation={[Math.PI / 1.95, 0, 0.18]}>
+        <ringGeometry args={[1.45, 3.5, 96, 1]} />
+        <meshBasicMaterial
+          color="#fff2cf"
+          transparent
+          opacity={0.18}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+
+      <mesh ref={accretionSecondaryRef} rotation={[Math.PI / 1.8, 0.25, -0.1]}>
+        <ringGeometry args={[1.2, 2.55, 96, 1]} />
+        <meshBasicMaterial
+          color="#7ef2c6"
+          transparent
+          opacity={0.08}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          toneMapped={false}
+        />
+      </mesh>
+
       <pointLight
         color="#7ef2c6"
-        intensity={progress * 25}
-        distance={35}
+        intensity={progress * 18}
+        distance={28}
         decay={2}
       />
 
       <spotLight
-        position={[0, 0, 0]}
-        target-position={[0, 5, 5]}
-        color="#7ef2c6"
-        intensity={progress * 15}
-        angle={Math.PI / 3}
+        position={[0, 4, -4]}
+        target-position={[0, 0, 0]}
+        color="#d7fff1"
+        intensity={progress * 10}
+        angle={Math.PI / 4.5}
         penumbra={1}
         distance={30}
         decay={2}
       />
-
-      <group ref={ringsRef}>
-        {ringData.map((ring, i) => (
-          <mesh key={i} rotation={[ring.tilt, 0, ring.phase]}>
-            <torusGeometry args={[ring.radius, 0.012, 8, 80]} />
-            <meshBasicMaterial
-              color="#7ef2c6"
-              transparent
-              opacity={0.3}
-              blending={THREE.AdditiveBlending}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
-      </group>
 
       <Suspense fallback={null}>
         <DarkStarModel progress={progress} />

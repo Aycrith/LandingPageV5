@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, Suspense } from "react";
+import { useRef, useMemo, Suspense, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -15,6 +15,7 @@ import {
   useStableSceneClone,
 } from "@/lib/scene";
 import { useRepeatingTexture } from "@/lib/textures";
+import { DottedWave } from "@/canvas/environment/DottedWave";
 
 interface ActProps {
   progress: number;
@@ -46,7 +47,7 @@ function QuantumModel({ progress }: { progress: number }) {
     const t = state.clock.elapsedTime;
     groupRef.current.rotation.y = t * 0.1;
     const appear = Math.min(progress / 0.3, 1);
-    groupRef.current.scale.setScalar(Math.min(appear * 0.02, fittedMaxScale));
+    groupRef.current.scale.setScalar(Math.min(appear * 0.035, fittedMaxScale));
   });
 
   return (
@@ -123,20 +124,20 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   const attractor2Ref = useRef<THREE.Mesh>(null);
   const orbitalsRef = useRef<THREE.InstancedMesh>(null);
 
-  const orbitalCount = 100;
+  const orbitalCount = 64;
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   const orbitalData = useMemo(() => {
     return Array.from({ length: orbitalCount }, (_, i) => ({
       angle: (i / orbitalCount) * Math.PI * 2,
-      radius: 0.8 + seededUnit(i * 29 + 1) * 4.5,
-      speed: 0.4 + seededUnit(i * 29 + 2) * 2.5,
+      radius: 0.9 + seededUnit(i * 29 + 1) * 3.2,
+      speed: 0.25 + seededUnit(i * 29 + 2) * 1.5,
       axis: new THREE.Vector3(
         seededSigned(i * 29 + 3),
         seededSigned(i * 29 + 4),
         seededSigned(i * 29 + 5)
       ).normalize(),
-      scale: 0.02 + seededUnit(i * 29 + 6) * 0.06,
+      scale: 0.014 + seededUnit(i * 29 + 6) * 0.032,
       attractorBias: seededUnit(i * 29 + 7),
     }));
   }, []);
@@ -144,17 +145,24 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   const quatTempRef = useRef(new THREE.Quaternion());
   const posTempRef = useRef(new THREE.Vector3());
 
+  useEffect(() => {
+    return () => {
+      useViewportAuditStore.getState().clearHeroModel("act4-paradox");
+    };
+  }, []);
+
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
 
-    const separation = Math.sin(progress * Math.PI) * 3.5;
+    const separation = Math.sin(progress * Math.PI) * 3.2;
+    groupRef.current.position.y = -0.4;
 
     if (attractor1Ref.current) {
       attractor1Ref.current.position.x = -separation;
       attractor1Ref.current.rotation.y = t * 0.5;
       attractor1Ref.current.rotation.x = t * 0.3;
-      const scale = 0.5 + Math.sin(t * 3) * 0.08;
+      const scale = 0.62 + Math.sin(t * 3) * 0.06;
       attractor1Ref.current.scale.setScalar(scale);
     }
 
@@ -162,7 +170,7 @@ export function Act4Quantum({ progress, visible }: ActProps) {
       attractor2Ref.current.position.x = separation;
       attractor2Ref.current.rotation.y = -t * 0.4;
       attractor2Ref.current.rotation.z = t * 0.2;
-      const scale = 0.5 + Math.cos(t * 3) * 0.08;
+      const scale = 0.62 + Math.cos(t * 3) * 0.06;
       attractor2Ref.current.scale.setScalar(scale);
     }
 
@@ -201,6 +209,8 @@ export function Act4Quantum({ progress, visible }: ActProps) {
 
   return (
     <group ref={groupRef}>
+      <DottedWave progress={progress} color="#ffd06f" yOffset={-4.1} />
+
       <mesh ref={attractor1Ref}>
         <dodecahedronGeometry args={[0.5, 2]} />
         <CrystalMaterial
@@ -224,7 +234,7 @@ export function Act4Quantum({ progress, visible }: ActProps) {
         <meshBasicMaterial
           color="#ffd06f"
           transparent
-          opacity={0.38}
+          opacity={0.26}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           toneMapped={false}
@@ -236,7 +246,7 @@ export function Act4Quantum({ progress, visible }: ActProps) {
         <meshBasicMaterial
           color="#ff7eb3"
           transparent
-          opacity={0.38}
+          opacity={0.26}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           toneMapped={false}
@@ -248,7 +258,7 @@ export function Act4Quantum({ progress, visible }: ActProps) {
         <meshBasicMaterial
           color="#ffd06f"
           transparent
-          opacity={0.9}
+          opacity={0.72}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           toneMapped={false}
@@ -265,15 +275,15 @@ export function Act4Quantum({ progress, visible }: ActProps) {
 
       <pointLight
         color="#ffd06f"
-        intensity={12}
-        distance={20}
+        intensity={10}
+        distance={18}
         decay={2}
         position={[-3, 0, 0]}
       />
       <pointLight
         color="#ff7eb3"
-        intensity={12}
-        distance={20}
+        intensity={10}
+        distance={18}
         decay={2}
         position={[3, 0, 0]}
       />
@@ -306,13 +316,13 @@ function EnergyBeam({ progress }: { progress: number }) {
       const frac = i / (pos.count - 1);
       array[i * 3] = THREE.MathUtils.lerp(-separation, separation, frac);
       array[i * 3 + 1] =
-        Math.sin(frac * Math.PI * 4 + t * 5) * 0.15 * progress;
+        Math.sin(frac * Math.PI * 4 + t * 5) * 0.22 * progress;
       array[i * 3 + 2] =
-        Math.cos(frac * Math.PI * 3 + t * 4) * 0.1 * progress;
+        Math.cos(frac * Math.PI * 3 + t * 4) * 0.14 * progress;
     }
     pos.needsUpdate = true;
     if (materialRef.current) {
-      materialRef.current.opacity = progress * 0.4;
+      materialRef.current.opacity = progress * 0.6;
     }
   });
 
