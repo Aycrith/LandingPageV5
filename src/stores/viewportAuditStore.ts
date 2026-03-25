@@ -45,6 +45,7 @@ interface TelemetryMetric {
 interface SceneStateMetric {
   mountedActs: number[];
   activeHeroLabel: string | null;
+  activeHeroAsset: string | null;
   overlayMode: string | null;
   ambientParticleMode: string | null;
 }
@@ -87,6 +88,7 @@ const INITIAL_TELEMETRY: TelemetryMetric = {
 const INITIAL_SCENE_STATE: SceneStateMetric = {
   mountedActs: [],
   activeHeroLabel: null,
+  activeHeroAsset: null,
   overlayMode: null,
   ambientParticleMode: null,
 };

@@ -109,6 +109,24 @@ function readSafeModeFlag(): boolean {
   }
 }
 
+function readForcedTier(): QualityTier | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const forceTier = new URLSearchParams(window.location.search).get(
+      "forceTier"
+    ) as QualityTier | null;
+
+    if (forceTier && ["high", "medium", "low"].includes(forceTier)) {
+      return forceTier;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 /** Release a temporary WebGL context so it doesn't count against the browser limit */
 function releaseProbeContext(gl: WebGL2RenderingContext | null) {
   if (!gl) return;
@@ -139,16 +157,12 @@ export function detectCapabilities(): RuntimeCaps {
     supportsWebGL2,
     prefersReducedMotion,
   };
+  const forcedTier = readForcedTier();
 
   if (process.env.NODE_ENV !== "production") {
-    // In dev, allow test parameters via URL
-    if (typeof window !== "undefined") {
-      const urlParams = new URLSearchParams(window.location.search);
-      const forceTier = urlParams.get("forceTier") as QualityTier | null;
-      if (forceTier && ["high", "medium", "low"].includes(forceTier)) {
-        releaseProbeContext(gl);
-        return buildCaps(forceTier, meta);
-      }
+    if (forcedTier) {
+      releaseProbeContext(gl);
+      return buildCaps(forcedTier, meta);
     }
     releaseProbeContext(gl);
     return buildCaps("low", meta);
@@ -157,6 +171,11 @@ export function detectCapabilities(): RuntimeCaps {
   if (readSafeModeFlag()) {
     releaseProbeContext(gl);
     return buildCaps("low", meta);
+  }
+
+  if (forcedTier) {
+    releaseProbeContext(gl);
+    return buildCaps(forcedTier, meta);
   }
 
   let tier: QualityTier = "medium";

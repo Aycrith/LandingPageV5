@@ -43,6 +43,17 @@ interface CompositionSnapshot {
   pointsCount: number;
 }
 
+function isActuallyVisible(node: THREE.Object3D | null): boolean {
+  let current: THREE.Object3D | null = node;
+  while (current) {
+    if (!current.visible) {
+      return false;
+    }
+    current = current.parent;
+  }
+  return true;
+}
+
 function pushSample(samples: number[], value: number) {
   if (samples.length >= MAX_SAMPLES) {
     samples.shift();
@@ -79,7 +90,10 @@ function collectMeshSnapshot(scene: THREE.Scene) {
 
   scene.traverse((node) => {
     const child = node as RenderableObject;
-    if (!(child.isMesh || child.isPoints || child.isLine) || !child.visible) {
+    if (
+      !(child.isMesh || child.isPoints || child.isLine) ||
+      !isActuallyVisible(child)
+    ) {
       return;
     }
 

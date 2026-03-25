@@ -9,6 +9,25 @@ export interface CameraPose {
 }
 
 export type AssetDisposition = "keep" | "rebuild" | "replace" | "remove";
+export type HeroAssetId =
+  | "dark_star"
+  | "wireframe_globe"
+  | "hologram"
+  | "quantum_leap"
+  | "paradox_abstract"
+  | "black_hole";
+export type HeroVariant =
+  | "singularity"
+  | "orbital-shell"
+  | "hologram"
+  | "paired-sentience"
+  | "event-horizon";
+export type SupportFxPreset =
+  | "seed-rings"
+  | "scaffold-lattice"
+  | "circulation-stream"
+  | "sentience-bridge"
+  | "apotheosis-crown";
 
 export interface HeroModelBehavior {
   baseScale: number;
@@ -149,10 +168,47 @@ export interface TransitionRig {
   rebirth: number;
 }
 
+export interface FogProfile {
+  color: string;
+  secondaryColor: string;
+  layerOpacity: number;
+  foregroundOpacity: number;
+  scale: number;
+  drift: number;
+}
+
+export interface ShadowProfile {
+  enabled: boolean;
+  receiverY: number;
+  radius: number;
+  opacity: number;
+}
+
+export interface ReferenceFrame {
+  pack: string;
+  image: string;
+}
+
+export interface CompositionZone {
+  heroOffset: Vec3Tuple;
+  uiOffset: Vec3Tuple;
+  safeRadius: number;
+}
+
+export interface VisualQaProfile {
+  expectedHeroAsset: HeroAssetId;
+  approvedSupportLayers: string[];
+  maxTransparentCount: number;
+  protectedUiZone: TextLayoutMode;
+}
+
 export interface WorldPhaseProfile {
   id: number;
   slug: string;
   heroLabel: string;
+  heroAsset: HeroAssetId;
+  heroVariant: HeroVariant;
+  supportFxPreset: SupportFxPreset;
   accent: string;
   copy: ActCopy;
   previewCamera: CameraPose;
@@ -179,10 +235,15 @@ export interface WorldPhaseProfile {
   };
   materialGrade: MaterialGradeProfile;
   lightingRig: LightRig;
+  fogProfile: FogProfile;
+  shadowProfile: ShadowProfile;
   uiRig: VolumetricUIRig;
+  referenceFrame: ReferenceFrame;
+  compositionZone: CompositionZone;
   motionRig: MotionRig;
   transitionRig: TransitionRig;
   assetDisposition: Record<string, AssetDisposition>;
+  visualQa: VisualQaProfile;
   maxModelViewportFill: number;
   heroModelBehavior: HeroModelBehavior;
   fxLayerBehavior: FxLayerBehavior;
@@ -256,7 +317,7 @@ export const STARTUP_CRITICAL_ASSETS = ["seed-core"] as const;
 
 export type StartupCriticalAsset = (typeof STARTUP_CRITICAL_ASSETS)[number];
 
-export const WORLD_PHASES: readonly WorldPhaseProfile[] = [
+const BASE_WORLD_PHASES = [
   {
     id: 0,
     slug: "seed",
@@ -1139,7 +1200,202 @@ export const WORLD_PHASES: readonly WorldPhaseProfile[] = [
     ambientParticleMode: "sparse",
     tierOverrides: createTierOverrides(),
   },
-] as const;
+  ] as const;
+
+interface PhaseVisualMeta {
+  heroAsset: HeroAssetId;
+  heroVariant: HeroVariant;
+  supportFxPreset: SupportFxPreset;
+  fogProfile: FogProfile;
+  shadowProfile: ShadowProfile;
+  referenceFrame: ReferenceFrame;
+  compositionZone: CompositionZone;
+  visualQa: VisualQaProfile;
+}
+
+const PHASE_VISUAL_META: Record<string, PhaseVisualMeta> = {
+  seed: {
+    heroAsset: "dark_star",
+    heroVariant: "singularity",
+    supportFxPreset: "seed-rings",
+    fogProfile: {
+      color: "#7df2de",
+      secondaryColor: "#071015",
+      layerOpacity: 0.15,
+      foregroundOpacity: 0.08,
+      scale: 10.5,
+      drift: 0.0035,
+    },
+    shadowProfile: {
+      enabled: false,
+      receiverY: -1.7,
+      radius: 3.8,
+      opacity: 0.12,
+    },
+    referenceFrame: {
+      pack: "Cosmic_Horror_Void_Stitch_Pack",
+      image: "A_Hero_Establishing_Void.png",
+    },
+    compositionZone: {
+      heroOffset: [0, -0.28, -0.32],
+      uiOffset: [-2.1, 1.55, 1.05],
+      safeRadius: 2.4,
+    },
+    visualQa: {
+      expectedHeroAsset: "dark_star",
+      approvedSupportLayers: ["seed-rings", "fog-atlas", "spores"],
+      maxTransparentCount: 24,
+      protectedUiZone: "left-column",
+    },
+  },
+  scaffold: {
+    heroAsset: "wireframe_globe",
+    heroVariant: "orbital-shell",
+    supportFxPreset: "scaffold-lattice",
+    fogProfile: {
+      color: "#84ccff",
+      secondaryColor: "#081019",
+      layerOpacity: 0.18,
+      foregroundOpacity: 0.1,
+      scale: 11.2,
+      drift: 0.0042,
+    },
+    shadowProfile: {
+      enabled: true,
+      receiverY: -1.55,
+      radius: 4.4,
+      opacity: 0.16,
+    },
+    referenceFrame: {
+      pack: "Cosmic_Horror_Void_Stitch_Pack",
+      image: "C_Microtubule_Lattice.png",
+    },
+    compositionZone: {
+      heroOffset: [0.52, -0.22, -0.34],
+      uiOffset: [-2.45, 1.42, 1.15],
+      safeRadius: 2.8,
+    },
+    visualQa: {
+      expectedHeroAsset: "wireframe_globe",
+      approvedSupportLayers: ["scaffold-lattice", "fog-atlas", "spores"],
+      maxTransparentCount: 24,
+      protectedUiZone: "left-column",
+    },
+  },
+  circulation: {
+    heroAsset: "hologram",
+    heroVariant: "hologram",
+    supportFxPreset: "circulation-stream",
+    fogProfile: {
+      color: "#7cf7f1",
+      secondaryColor: "#071319",
+      layerOpacity: 0.2,
+      foregroundOpacity: 0.12,
+      scale: 12.2,
+      drift: 0.005,
+    },
+    shadowProfile: {
+      enabled: false,
+      receiverY: -1.8,
+      radius: 4.2,
+      opacity: 0.12,
+    },
+    referenceFrame: {
+      pack: "Cosmic_Horror_Void_Stitch_Pack",
+      image: "D_Nebula_Tunnel_Traversal.png",
+    },
+    compositionZone: {
+      heroOffset: [0.88, -0.02, -0.62],
+      uiOffset: [-2.55, 1.2, 1.22],
+      safeRadius: 3.1,
+    },
+    visualQa: {
+      expectedHeroAsset: "hologram",
+      approvedSupportLayers: ["circulation-stream", "fog-atlas", "spores"],
+      maxTransparentCount: 25,
+      protectedUiZone: "left-column",
+    },
+  },
+  sentience: {
+    heroAsset: "quantum_leap",
+    heroVariant: "paired-sentience",
+    supportFxPreset: "sentience-bridge",
+    fogProfile: {
+      color: "#cf9aff",
+      secondaryColor: "#120816",
+      layerOpacity: 0.16,
+      foregroundOpacity: 0.09,
+      scale: 10.8,
+      drift: 0.0038,
+    },
+    shadowProfile: {
+      enabled: true,
+      receiverY: -1.52,
+      radius: 4.8,
+      opacity: 0.14,
+    },
+    referenceFrame: {
+      pack: "Cosmic_Horror_Void_Stitch_Pack",
+      image: "E_Orbiting_Monolith.png",
+    },
+    compositionZone: {
+      heroOffset: [0, -0.12, -0.38],
+      uiOffset: [0, 1.76, 1.3],
+      safeRadius: 2.9,
+    },
+    visualQa: {
+      expectedHeroAsset: "quantum_leap",
+      approvedSupportLayers: ["sentience-bridge", "fog-atlas", "particle-nervous-system"],
+      maxTransparentCount: 24,
+      protectedUiZone: "upper-band",
+    },
+  },
+  apotheosis: {
+    heroAsset: "black_hole",
+    heroVariant: "event-horizon",
+    supportFxPreset: "apotheosis-crown",
+    fogProfile: {
+      color: "#f4a7df",
+      secondaryColor: "#12060d",
+      layerOpacity: 0.18,
+      foregroundOpacity: 0.11,
+      scale: 12.8,
+      drift: 0.0046,
+    },
+    shadowProfile: {
+      enabled: true,
+      receiverY: -1.68,
+      radius: 5.4,
+      opacity: 0.18,
+    },
+    referenceFrame: {
+      pack: "Cosmic_Horror_Void_Stitch_Pack",
+      image: "B_Black_Hole_Close_Up.png",
+    },
+    compositionZone: {
+      heroOffset: [0, 0.08, -0.55],
+      uiOffset: [0, -1.28, 1.45],
+      safeRadius: 3.2,
+    },
+    visualQa: {
+      expectedHeroAsset: "black_hole",
+      approvedSupportLayers: ["apotheosis-crown", "fog-atlas", "particle-nervous-system"],
+      maxTransparentCount: 28,
+      protectedUiZone: "lower-third",
+    },
+  },
+};
+
+export const WORLD_PHASES: readonly WorldPhaseProfile[] = BASE_WORLD_PHASES.map(
+  (phase) => ({
+    ...phase,
+    ...PHASE_VISUAL_META[phase.slug],
+    uiRig: {
+      ...phase.uiRig,
+      anchor: PHASE_VISUAL_META[phase.slug].compositionZone.uiOffset,
+    },
+  })
+);
 
 export const ACT_VIEWPORT_PROFILES = WORLD_PHASES;
 

@@ -18,7 +18,7 @@ function opacityScale(value: number) {
 }
 
 function getAnchorX(profile: WorldPhaseProfile): "left" | "center" {
-  return Math.abs(profile.uiRig.anchor[0]) < 0.2 ? "center" : "left";
+  return Math.abs(profile.compositionZone.uiOffset[0]) < 0.2 ? "center" : "left";
 }
 
 function UiBlock({
@@ -38,16 +38,15 @@ function UiBlock({
   const align = getAnchorX(profile);
   const titleAnchor = align === "center" ? "center" : "left";
   const railLocal = [
-    profile.uiRig.railOffset[0] - profile.uiRig.anchor[0],
-    profile.uiRig.railOffset[1] - profile.uiRig.anchor[1],
-    profile.uiRig.railOffset[2] - profile.uiRig.anchor[2],
+    profile.uiRig.railOffset[0] - profile.compositionZone.uiOffset[0],
+    profile.uiRig.railOffset[1] - profile.compositionZone.uiOffset[1],
+    profile.uiRig.railOffset[2] - profile.compositionZone.uiOffset[2],
   ] as const;
   const ctaLocal = [
-    profile.uiRig.ctaAnchor[0] - profile.uiRig.anchor[0],
-    profile.uiRig.ctaAnchor[1] - profile.uiRig.anchor[1],
-    profile.uiRig.ctaAnchor[2] - profile.uiRig.anchor[2],
+    profile.uiRig.ctaAnchor[0] - profile.compositionZone.uiOffset[0],
+    profile.uiRig.ctaAnchor[1] - profile.compositionZone.uiOffset[1],
+    profile.uiRig.ctaAnchor[2] - profile.compositionZone.uiOffset[2],
   ] as const;
-  const panelWidth = align === "center" ? 4.8 : 4.2;
   const ringIntensity = ctaFocused ? 1.35 : 0.8;
   const ringOpacityBoost = ctaFocused ? 0.22 : 0;
 
@@ -66,34 +65,18 @@ function UiBlock({
     <group
       ref={blockRef}
       position={[
-        profile.uiRig.anchor[0],
-        profile.uiRig.anchor[1],
-        profile.uiRig.anchor[2] - 1.15,
+        profile.compositionZone.uiOffset[0],
+        profile.compositionZone.uiOffset[1],
+        profile.compositionZone.uiOffset[2] - 0.85,
       ]}
-      scale={0.42 + emphasis * 0.04}
+      scale={0.34 + emphasis * 0.03}
     >
-      <mesh position={[0, 0.02, -0.12]}>
-        <boxGeometry args={[panelWidth, 2.15, 0.05]} />
-        <meshPhysicalMaterial
-          color="#071015"
-          emissive={profile.accent}
-          emissiveIntensity={0.025 * emphasis}
-          transparent
-          opacity={0.08 * opacity}
-          metalness={0.1}
-          roughness={0.18}
-          transmission={0.2}
-          thickness={0.8}
-          depthWrite={false}
-        />
-      </mesh>
-
       <mesh position={railLocal}>
         <boxGeometry args={[0.04, 2.15, 0.04]} />
         <meshBasicMaterial
           color={profile.accent}
           transparent
-          opacity={0.52 * opacity}
+          opacity={0.42 * opacity}
           toneMapped={false}
         />
       </mesh>
@@ -103,7 +86,7 @@ function UiBlock({
         <meshBasicMaterial
           color={profile.accent}
           transparent
-          opacity={0.78 * opacity}
+          opacity={0.72 * opacity}
           toneMapped={false}
         />
       </mesh>
@@ -115,10 +98,10 @@ function UiBlock({
         color={profile.accent}
         anchorX={titleAnchor}
         anchorY="middle"
-        fillOpacity={0.86 * opacity}
+        fillOpacity={0.82 * opacity}
         outlineColor="#020304"
-        outlineOpacity={0.5 * opacity}
-        outlineWidth={0.008}
+        outlineOpacity={0.36 * opacity}
+        outlineWidth={0.006}
         maxWidth={profile.uiRig.maxWidth}
       >
         {profile.copy.eyebrow.toUpperCase()}
@@ -134,8 +117,8 @@ function UiBlock({
         anchorY="middle"
         fillOpacity={opacity}
         outlineColor="#020304"
-        outlineOpacity={0.38 * opacity}
-        outlineWidth={0.012}
+        outlineOpacity={0.28 * opacity}
+        outlineWidth={0.008}
         maxWidth={profile.uiRig.maxWidth}
       >
         {profile.copy.title}
@@ -148,7 +131,7 @@ function UiBlock({
         color="#dce6ea"
         anchorX={titleAnchor}
         anchorY="middle"
-        fillOpacity={0.78 * opacity}
+        fillOpacity={0.7 * opacity}
         maxWidth={profile.uiRig.maxWidth}
       >
         {profile.copy.subtitle.toUpperCase()}
@@ -162,7 +145,7 @@ function UiBlock({
           color="#adbac0"
           anchorX={titleAnchor}
           anchorY="top"
-          fillOpacity={0.68 * opacity}
+          fillOpacity={0.58 * opacity}
           maxWidth={profile.uiRig.maxWidth}
         >
           {profile.copy.body}

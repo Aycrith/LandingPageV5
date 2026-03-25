@@ -5,47 +5,54 @@ export const ACT_SNAPSHOTS = [
     name: "act1-entry",
     progress: 0.06,
     heroLabel: "seed-core",
-    maxTransparentCount: 20,
+    heroAsset: "dark_star",
+    maxTransparentCount: 28,
     containsActs: [0, 1],
   },
   {
     name: "act2-entry",
     progress: 0.26,
     heroLabel: "scaffold-shell",
-    maxTransparentCount: 18,
+    heroAsset: "wireframe_globe",
+    maxTransparentCount: 32,
     containsActs: [1, 2],
   },
   {
     name: "act3-entry",
     progress: 0.46,
     heroLabel: "circulation-core",
-    maxTransparentCount: 18,
+    heroAsset: "hologram",
+    maxTransparentCount: 34,
     containsActs: [2, 3],
   },
   {
     name: "act4-entry",
     progress: 0.66,
     heroLabel: "sentience-bridge",
-    maxTransparentCount: 19,
+    heroAsset: "quantum_leap",
+    maxTransparentCount: 34,
     containsActs: [3, 4],
   },
   {
     name: "act5-entry",
     progress: 0.86,
     heroLabel: "apotheosis-crown",
-    maxTransparentCount: 22,
+    heroAsset: "black_hole",
+    maxTransparentCount: 36,
     containsActs: [4, 0],
   },
   {
     name: "wrap-rebirth",
-    progress: 0.98,
-    heroLabel: "apotheosis-crown",
-    maxTransparentCount: 18,
+    progress: 0.995,
+    heroLabel: "seed-core",
+    heroAsset: "dark_star",
+    maxTransparentCount: 28,
     containsActs: [4, 0],
   },
 ] as const;
 
 const AUDIT_BASE_URL = "http://localhost:3100";
+export const FLAGSHIP_AUDIT_QUERY = "?audit=1&forceTier=high";
 
 export async function waitForExperienceReady(page: Page, search = "") {
   await page.goto(`${AUDIT_BASE_URL}/${search}`);

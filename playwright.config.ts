@@ -29,7 +29,7 @@ export default defineConfig({
   webServer: {
     command: `npm run build && npm run start -- -p ${PORT}`,
     url: `http://${HOST}:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 240_000,
   },
 });

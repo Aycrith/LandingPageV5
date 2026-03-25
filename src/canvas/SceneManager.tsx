@@ -47,6 +47,8 @@ export function SceneManager() {
       : 0;
   const activeHeroLabel =
     rebirthBlend > 0.45 ? nextProfile.heroLabel : currentProfile.heroLabel;
+  const activeHeroAsset =
+    rebirthBlend > 0.45 ? nextProfile.heroAsset : currentProfile.heroAsset;
   const mountedActs = useMemo(
     () => Array.from(new Set([activeAct, nextAct])),
     [activeAct, nextAct]
@@ -71,12 +73,20 @@ export function SceneManager() {
     audit.reportSceneState({
       mountedActs,
       activeHeroLabel,
+      activeHeroAsset,
       overlayMode: currentProfile.overlayMode,
       ambientParticleMode,
     });
     audit.pruneHeroModels([activeHeroLabel]);
     audit.pruneFxLayers(activeAct === WORLD_PHASES.length - 1 ? ["apotheosis-core"] : []);
-  }, [activeAct, activeHeroLabel, ambientParticleMode, currentProfile.overlayMode, mountedActs]);
+  }, [
+    activeAct,
+    activeHeroAsset,
+    activeHeroLabel,
+    ambientParticleMode,
+    currentProfile.overlayMode,
+    mountedActs,
+  ]);
 
   useFrame((state) => {
     const blendT = actProgress;
