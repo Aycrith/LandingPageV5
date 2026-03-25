@@ -31,6 +31,7 @@ export default function Experience() {
   const startupStartedAt = useSceneLoadStore((s) => s.startupStartedAt);
   const startupProgress = useSceneLoadStore(getSceneStartupProgress);
   const startupReady = useSceneLoadStore(isSceneStartupReady);
+  const hasFallbackTriggered = useSceneLoadStore((s) => s.hasFallbackTriggered);
 
   useEffect(() => {
     const detected = detectCapabilities();
@@ -64,30 +65,61 @@ export default function Experience() {
   if (!caps) return null;
 
   return (
-    <Canvas
-      gl={{
-        antialias: caps.tier !== "low",
-        alpha: false,
-        powerPreference: caps.tier === "high" ? "high-performance" : "low-power",
-        toneMapping: ACESFilmicToneMapping,
-        toneMappingExposure: 1.0,
-      }}
-      dpr={caps.dpr}
-      performance={{ min: 0.3, max: 1, debounce: 250 }}
-      shadows={caps.enableShadows ? "percentage" : false}
-      camera={{
-        position: STARTUP_PROFILE.previewCamera.position,
-        fov: STARTUP_PROFILE.previewCamera.fov,
-        near: 0.1,
-        far: 200,
-      }}
-      style={{ background: "#050507" }}
-    >
-      <StartupReadinessGate />
-      <ViewportAuditProbe />
-      <CameraRig />
-      <SceneManager />
-      <PostProcessingStack />
-    </Canvas>
+    <>
+      <Canvas
+        gl={{
+          antialias: caps.tier !== "low",
+          alpha: false,
+          powerPreference:
+            caps.tier === "high" ? "high-performance" : "low-power",
+          failIfMajorPerformanceCaveat: false,
+          toneMapping: ACESFilmicToneMapping,
+          toneMappingExposure: 1.0,
+        }}
+        dpr={caps.dpr}
+        performance={{ min: 0.3, max: 1, debounce: 250 }}
+        shadows={caps.enableShadows ? "percentage" : false}
+        camera={{
+          position: STARTUP_PROFILE.previewCamera.position,
+          fov: STARTUP_PROFILE.previewCamera.fov,
+          near: 0.1,
+          far: 200,
+        }}
+        style={{ background: "#050507" }}
+        onCreated={(state) => {
+          if (state.gl.getContext().isContextLost()) {
+            useSceneLoadStore.getState().markFallbackTriggered();
+          }
+        }}
+      >
+        <StartupReadinessGate />
+        <ViewportAuditProbe />
+        <CameraRig />
+        {!hasFallbackTriggered && (
+          <>
+            <SceneManager />
+            <PostProcessingStack />
+          </>
+        )}
+      </Canvas>
+      {hasFallbackTriggered ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#050507",
+            color: "#666",
+            fontSize: "0.8rem",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          }}
+        >
+          Visuals limited (Safe Mode)
+        </div>
+      ) : null}
+    </>
   );
 }

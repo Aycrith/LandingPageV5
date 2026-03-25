@@ -35,25 +35,46 @@ interface RenderPipelineMetric {
   };
 }
 
+interface TelemetryMetric {
+  hasFallbackTriggered: boolean;
+  startupTimeMs: number | null;
+  safeModeReason: string | null;
+  tier: string | null;
+}
+
 interface ViewportAuditState {
   heroModels: Record<string, HeroModelMetric>;
   fxLayers: Record<string, FxLayerMetric>;
   renderPipeline: RenderPipelineMetric | null;
+  telemetry: TelemetryMetric;
   reset: () => void;
   reportHeroModel: (label: string, metric: HeroModelMetric) => void;
   reportFxLayer: (label: string, metric: FxLayerMetric) => void;
   reportRenderPipeline: (metric: RenderPipelineMetric) => void;
+  reportTelemetry: (metric: Partial<TelemetryMetric>) => void;
 }
 
 export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
   heroModels: {},
   fxLayers: {},
   renderPipeline: null,
+  telemetry: {
+    hasFallbackTriggered: false,
+    startupTimeMs: null,
+    safeModeReason: null,
+    tier: null,
+  },
   reset: () =>
     set({
       heroModels: {},
       fxLayers: {},
       renderPipeline: null,
+      telemetry: {
+        hasFallbackTriggered: false,
+        startupTimeMs: null,
+        safeModeReason: null,
+        tier: null,
+      },
     }),
   reportHeroModel: (label, metric) =>
     set((state) => ({
@@ -73,4 +94,8 @@ export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
     set({
       renderPipeline: metric,
     }),
+  reportTelemetry: (metric) => 
+    set((state) => ({
+      telemetry: { ...state.telemetry, ...metric }
+    })),
 }));
