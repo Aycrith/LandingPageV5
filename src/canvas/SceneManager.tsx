@@ -1,43 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, Suspense, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Environment } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useScrollStore } from "@/stores/scrollStore";
 import { useCapsStore, type QualityTier } from "@/stores/capsStore";
+import { useScrollStore } from "@/stores/scrollStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
-import { ParticleField } from "./particles/ParticleField";
-import { SkyBox } from "./environment/SkyBox";
-import { Act1Emergence } from "./acts/Act1Emergence";
-import { Act2Structure } from "./acts/Act2Structure";
-import { Act3Flow } from "./acts/Act3Flow";
-import { Act4Quantum } from "./acts/Act4Quantum";
-import { Act5Convergence } from "./acts/Act5Convergence";
-import {
-  ACT_VIEWPORT_PROFILES,
-  type AmbientParticleMode,
-  type ActViewportProfile,
-} from "./viewportProfiles";
+import { SeamlessWorld } from "./SeamlessWorld";
+import { WORLD_PHASES, type AmbientParticleMode, type WorldPhaseProfile } from "./viewportProfiles";
 import { tupleToVector3 } from "@/lib/scene";
 
-const ACT_FX_LABELS: ReadonlyArray<readonly string[]> = [
-  ["act1-glow"],
-  [],
-  [],
-  [],
-  ["act5-inner-core"],
-];
-
-function resolveRenderRange(profile: ActViewportProfile, tier: QualityTier): number {
-  return profile.tierOverrides[tier]?.renderRange ?? (tier === "high" ? 1 : 0);
-}
-
 function resolveAmbientParticleMode(
-  profile: ActViewportProfile,
+  profile: WorldPhaseProfile,
   tier: QualityTier
 ): AmbientParticleMode {
   return profile.tierOverrides[tier]?.ambientParticleMode ?? profile.ambientParticleMode;
+}
+
+function nextPhaseIndex(index: number) {
+  return (index + 1) % WORLD_PHASES.length;
 }
 
 export function SceneManager() {
@@ -46,230 +28,221 @@ export function SceneManager() {
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const fillLightRef = useRef<THREE.PointLight>(null);
   const rimLightRef = useRef<THREE.SpotLight>(null);
+  const practicalLightRef = useRef<THREE.PointLight>(null);
 
   const activeAct = useScrollStore((state) => state.activeAct);
   const actProgress = useScrollStore((state) => state.actProgress);
   const caps = useCapsStore((state) => state.caps);
-
   const tier = caps?.tier ?? "low";
-  const activeProfile = ACT_VIEWPORT_PROFILES[activeAct];
-  const renderRange = resolveRenderRange(activeProfile, tier);
+  const currentProfile = WORLD_PHASES[activeAct];
+  const nextAct = nextPhaseIndex(activeAct);
+  const nextProfile = WORLD_PHASES[nextAct];
+  const rebirthBlend =
+    activeAct === WORLD_PHASES.length - 1
+      ? THREE.MathUtils.smoothstep(
+          actProgress,
+          currentProfile.transitionRig.rebirth,
+          1
+        )
+      : 0;
+  const activeHeroLabel =
+    rebirthBlend > 0.45 ? nextProfile.heroLabel : currentProfile.heroLabel;
   const mountedActs = useMemo(
-    () =>
-      ACT_VIEWPORT_PROFILES.filter((profile) =>
-        Math.abs(profile.id - activeAct) <= renderRange
-      ).map((profile) => profile.id),
-    [activeAct, renderRange]
+    () => Array.from(new Set([activeAct, nextAct])),
+    [activeAct, nextAct]
   );
-  const mountedActsKey = mountedActs.join(",");
-  const ambientParticleMode = resolveAmbientParticleMode(activeProfile, tier);
+  const ambientParticleMode =
+    rebirthBlend > 0.45
+      ? resolveAmbientParticleMode(nextProfile, tier)
+      : resolveAmbientParticleMode(currentProfile, tier);
 
-  const fogColors = useMemo(
-    () =>
-      ACT_VIEWPORT_PROFILES.map((profile) => new THREE.Color(profile.lightRig.fogColor)),
-    []
-  );
-  const keyColors = useMemo(
-    () =>
-      ACT_VIEWPORT_PROFILES.map((profile) => new THREE.Color(profile.lightRig.key.color)),
-    []
-  );
-  const fillColors = useMemo(
-    () =>
-      ACT_VIEWPORT_PROFILES.map((profile) => new THREE.Color(profile.lightRig.fill.color)),
-    []
-  );
-  const rimColors = useMemo(
-    () =>
-      ACT_VIEWPORT_PROFILES.map((profile) => new THREE.Color(profile.lightRig.rim.color)),
-    []
-  );
-  const blendFog = useMemo(() => new THREE.Color(), []);
-  const blendKey = useMemo(() => new THREE.Color(), []);
-  const blendFill = useMemo(() => new THREE.Color(), []);
-  const blendRim = useMemo(() => new THREE.Color(), []);
+  const fogColor = useMemo(() => new THREE.Color(), []);
+  const keyColor = useMemo(() => new THREE.Color(), []);
+  const fillColor = useMemo(() => new THREE.Color(), []);
+  const rimColor = useMemo(() => new THREE.Color(), []);
+  const practicalColor = useMemo(() => new THREE.Color(), []);
   const vectorA = useMemo(() => new THREE.Vector3(), []);
   const vectorB = useMemo(() => new THREE.Vector3(), []);
+  const vectorC = useMemo(() => new THREE.Vector3(), []);
+  const vectorD = useMemo(() => new THREE.Vector3(), []);
 
   useEffect(() => {
-    const store = useViewportAuditStore.getState();
-    store.reportSceneState({
+    const audit = useViewportAuditStore.getState();
+    audit.reportSceneState({
       mountedActs,
-      activeHeroLabel: activeProfile.heroLabel,
-      overlayMode: activeProfile.overlayMode,
+      activeHeroLabel,
+      overlayMode: currentProfile.overlayMode,
       ambientParticleMode,
     });
-    store.pruneHeroModels([activeProfile.heroLabel]);
-    store.pruneFxLayers([...ACT_FX_LABELS[activeAct]]);
-  }, [
-    activeAct,
-    activeProfile.heroLabel,
-    activeProfile.overlayMode,
-    ambientParticleMode,
-    mountedActs,
-    mountedActsKey,
-  ]);
+    audit.pruneHeroModels([activeHeroLabel]);
+    audit.pruneFxLayers(activeAct === WORLD_PHASES.length - 1 ? ["apotheosis-core"] : []);
+  }, [activeAct, activeHeroLabel, ambientParticleMode, currentProfile.overlayMode, mountedActs]);
 
-  useFrame(() => {
-    const nextAct = Math.min(activeAct + 1, ACT_VIEWPORT_PROFILES.length - 1);
-    const currentProfile = ACT_VIEWPORT_PROFILES[activeAct];
-    const nextProfile = ACT_VIEWPORT_PROFILES[nextAct];
+  useFrame((state) => {
     const blendT = actProgress;
 
-    blendFog.copy(fogColors[activeAct]).lerp(fogColors[nextAct], blendT);
+    fogColor
+      .set(currentProfile.lightingRig.fogColor)
+      .lerp(new THREE.Color(nextProfile.lightingRig.fogColor), blendT);
     if (fogRef.current) {
-      fogRef.current.color.copy(blendFog);
+      fogRef.current.color.copy(fogColor);
       fogRef.current.density = THREE.MathUtils.lerp(
-        currentProfile.lightRig.fogDensity,
-        nextProfile.lightRig.fogDensity,
+        currentProfile.lightingRig.fogDensity,
+        nextProfile.lightingRig.fogDensity,
         blendT
       );
     }
+
+    state.gl.toneMappingExposure = THREE.MathUtils.lerp(
+      currentProfile.lightingRig.exposure,
+      nextProfile.lightingRig.exposure,
+      blendT
+    );
 
     if (ambientRef.current) {
       ambientRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightRig.ambientIntensity,
-        nextProfile.lightRig.ambientIntensity,
+        currentProfile.lightingRig.ambientIntensity,
+        nextProfile.lightingRig.ambientIntensity,
         blendT
       );
     }
 
-    blendKey.copy(keyColors[activeAct]).lerp(keyColors[nextAct], blendT);
+    keyColor
+      .set(currentProfile.lightingRig.key.color)
+      .lerp(new THREE.Color(nextProfile.lightingRig.key.color), blendT);
     if (keyLightRef.current) {
-      keyLightRef.current.color.copy(blendKey);
+      keyLightRef.current.color.copy(keyColor);
       keyLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightRig.key.intensity,
-        nextProfile.lightRig.key.intensity,
+        currentProfile.lightingRig.key.intensity,
+        nextProfile.lightingRig.key.intensity,
         blendT
       );
       keyLightRef.current.position.copy(
         vectorA
-          .copy(tupleToVector3(currentProfile.lightRig.key.position))
-          .lerp(tupleToVector3(nextProfile.lightRig.key.position), blendT)
+          .copy(tupleToVector3(currentProfile.lightingRig.key.position))
+          .lerp(tupleToVector3(nextProfile.lightingRig.key.position), blendT)
       );
     }
 
-    blendFill.copy(fillColors[activeAct]).lerp(fillColors[nextAct], blendT);
+    fillColor
+      .set(currentProfile.lightingRig.fill.color)
+      .lerp(new THREE.Color(nextProfile.lightingRig.fill.color), blendT);
     if (fillLightRef.current) {
-      fillLightRef.current.color.copy(blendFill);
+      fillLightRef.current.color.copy(fillColor);
       fillLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightRig.fill.intensity,
-        nextProfile.lightRig.fill.intensity,
+        currentProfile.lightingRig.fill.intensity,
+        nextProfile.lightingRig.fill.intensity,
         blendT
       );
       fillLightRef.current.position.copy(
         vectorB
-          .copy(tupleToVector3(currentProfile.lightRig.fill.position))
-          .lerp(tupleToVector3(nextProfile.lightRig.fill.position), blendT)
+          .copy(tupleToVector3(currentProfile.lightingRig.fill.position))
+          .lerp(tupleToVector3(nextProfile.lightingRig.fill.position), blendT)
       );
     }
 
-    blendRim.copy(rimColors[activeAct]).lerp(rimColors[nextAct], blendT);
+    rimColor
+      .set(currentProfile.lightingRig.rim.color)
+      .lerp(new THREE.Color(nextProfile.lightingRig.rim.color), blendT);
     if (rimLightRef.current) {
-      rimLightRef.current.color.copy(blendRim);
+      rimLightRef.current.color.copy(rimColor);
       rimLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightRig.rim.intensity,
-        nextProfile.lightRig.rim.intensity,
+        currentProfile.lightingRig.rim.intensity,
+        nextProfile.lightingRig.rim.intensity,
         blendT
       );
       rimLightRef.current.angle = THREE.MathUtils.lerp(
-        currentProfile.lightRig.rim.angle,
-        nextProfile.lightRig.rim.angle,
+        currentProfile.lightingRig.rim.angle,
+        nextProfile.lightingRig.rim.angle,
         blendT
       );
-      rimLightRef.current.position.lerpVectors(
-        tupleToVector3(currentProfile.lightRig.rim.position),
-        tupleToVector3(nextProfile.lightRig.rim.position),
+      rimLightRef.current.position.copy(
+        vectorC
+          .copy(tupleToVector3(currentProfile.lightingRig.rim.position))
+          .lerp(tupleToVector3(nextProfile.lightingRig.rim.position), blendT)
+      );
+    }
+
+    practicalColor
+      .set(currentProfile.lightingRig.practical.color)
+      .lerp(new THREE.Color(nextProfile.lightingRig.practical.color), blendT);
+    if (practicalLightRef.current) {
+      practicalLightRef.current.color.copy(practicalColor);
+      practicalLightRef.current.intensity = THREE.MathUtils.lerp(
+        currentProfile.lightingRig.practical.intensity,
+        nextProfile.lightingRig.practical.intensity,
         blendT
+      );
+      practicalLightRef.current.position.copy(
+        vectorD
+          .copy(tupleToVector3(currentProfile.lightingRig.practical.position))
+          .lerp(tupleToVector3(nextProfile.lightingRig.practical.position), blendT)
       );
     }
   });
-
-  const shouldRenderAct = (actIndex: number): boolean =>
-    Math.abs(activeAct - actIndex) <= renderRange;
 
   return (
     <>
       <fogExp2
         ref={fogRef}
         attach="fog"
-        args={[activeProfile.lightRig.fogColor, activeProfile.lightRig.fogDensity]}
+        args={[currentProfile.lightingRig.fogColor, currentProfile.lightingRig.fogDensity]}
       />
 
-      <ambientLight ref={ambientRef} intensity={activeProfile.lightRig.ambientIntensity} />
+      <ambientLight
+        ref={ambientRef}
+        intensity={currentProfile.lightingRig.ambientIntensity}
+      />
       <directionalLight
         ref={keyLightRef}
-        position={activeProfile.lightRig.key.position}
-        intensity={activeProfile.lightRig.key.intensity}
-        color={activeProfile.lightRig.key.color}
-        castShadow={caps?.enableShadows}
-        shadow-mapSize-width={tier === "high" ? 2048 : 1024}
-        shadow-mapSize-height={tier === "high" ? 2048 : 1024}
-        shadow-bias={-0.00012}
+        position={currentProfile.lightingRig.key.position}
+        intensity={currentProfile.lightingRig.key.intensity}
+        color={currentProfile.lightingRig.key.color}
+        castShadow={tier === "high" && Boolean(caps?.enableShadows)}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-bias={-0.00015}
       />
       <pointLight
         ref={fillLightRef}
-        position={activeProfile.lightRig.fill.position}
-        intensity={activeProfile.lightRig.fill.intensity}
-        color={activeProfile.lightRig.fill.color}
-        distance={34}
+        position={currentProfile.lightingRig.fill.position}
+        intensity={currentProfile.lightingRig.fill.intensity}
+        color={currentProfile.lightingRig.fill.color}
+        distance={28}
         decay={2}
       />
       <spotLight
         ref={rimLightRef}
-        position={activeProfile.lightRig.rim.position}
-        intensity={activeProfile.lightRig.rim.intensity}
-        color={activeProfile.lightRig.rim.color}
-        angle={activeProfile.lightRig.rim.angle}
-        penumbra={0.85}
-        distance={42}
+        position={currentProfile.lightingRig.rim.position}
+        intensity={currentProfile.lightingRig.rim.intensity}
+        color={currentProfile.lightingRig.rim.color}
+        angle={currentProfile.lightingRig.rim.angle}
+        penumbra={0.92}
+        distance={32}
         decay={2}
       />
-
-      <SkyBox />
+      <pointLight
+        ref={practicalLightRef}
+        position={currentProfile.lightingRig.practical.position}
+        intensity={currentProfile.lightingRig.practical.intensity}
+        color={currentProfile.lightingRig.practical.color}
+        distance={14}
+        decay={2}
+      />
 
       <Suspense fallback={null}>
         {tier === "high" ? (
           <Environment files="/env/hdri/kloppenheim_07_4k.exr" background={false} />
         ) : tier === "medium" ? (
-          <Environment preset="city" background={false} />
+          <Environment preset="studio" background={false} />
         ) : null}
       </Suspense>
 
-      {caps?.tier !== "low" && ambientParticleMode !== "none" ? (
-        <ParticleField mode={ambientParticleMode} />
-      ) : null}
-
-      {shouldRenderAct(0) ? (
-        <Act1Emergence
-          progress={activeAct === 0 ? actProgress : 0}
-          visible={true}
-        />
-      ) : null}
-      {shouldRenderAct(1) ? (
-        <Act2Structure
-          progress={activeAct === 1 ? actProgress : activeAct > 1 ? 1 : 0}
-          visible={true}
-        />
-      ) : null}
-      {shouldRenderAct(2) ? (
-        <Act3Flow
-          progress={activeAct === 2 ? actProgress : activeAct > 2 ? 1 : 0}
-          visible={true}
-        />
-      ) : null}
-      {shouldRenderAct(3) ? (
-        <Act4Quantum
-          progress={activeAct === 3 ? actProgress : activeAct > 3 ? 1 : 0}
-          visible={true}
-        />
-      ) : null}
-      {shouldRenderAct(4) ? (
-        <Act5Convergence
-          progress={activeAct === 4 ? actProgress : 0}
-          visible={true}
-        />
-      ) : null}
+      <SeamlessWorld
+        activeAct={activeAct}
+        phaseBlend={actProgress}
+        tier={tier}
+      />
     </>
   );
 }

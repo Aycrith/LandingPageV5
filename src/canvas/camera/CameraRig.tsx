@@ -1,61 +1,64 @@
 "use client";
 
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useScrollStore } from "@/stores/scrollStore";
 import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useMouseParallax } from "@/hooks/useMouseParallax";
-import { ACT_VIEWPORT_PROFILES } from "../viewportProfiles";
+import { WORLD_PHASES } from "../viewportProfiles";
 import { tupleToVector3 } from "@/lib/scene";
 
-const STARTUP_PROFILE = ACT_VIEWPORT_PROFILES[0];
+const STARTUP_PHASE = WORLD_PHASES[0];
 
 export function CameraRig() {
   const { camera } = useThree();
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const mouse = useMouseParallax();
-  const targetPos = useRef(
-    tupleToVector3(STARTUP_PROFILE.previewCamera.position)
-  );
-  const targetLookAt = useRef(
-    tupleToVector3(STARTUP_PROFILE.previewCamera.lookAt)
-  );
-  const currentPos = useRef(
-    tupleToVector3(STARTUP_PROFILE.previewCamera.position)
-  );
-  const currentLookAt = useRef(
-    tupleToVector3(STARTUP_PROFILE.previewCamera.lookAt)
-  );
+  const targetPos = useRef(tupleToVector3(STARTUP_PHASE.previewCamera.position));
+  const targetLookAt = useRef(tupleToVector3(STARTUP_PHASE.previewCamera.lookAt));
+  const currentPos = useRef(tupleToVector3(STARTUP_PHASE.previewCamera.position));
+  const currentLookAt = useRef(tupleToVector3(STARTUP_PHASE.previewCamera.lookAt));
   const startupSettlingStartedAt = useRef<number | null>(null);
   const startupSequenceComplete = useRef(false);
 
-  const curves = useMemo(() => {
-    return ACT_VIEWPORT_PROFILES.map((profile) => ({
-      posCurve: new THREE.CatmullRomCurve3(
-        profile.cameraPath.positions.map((point) => tupleToVector3(point))
+  const positionCurve = useMemo(
+    () =>
+      new THREE.CatmullRomCurve3(
+        WORLD_PHASES.map((phase) => tupleToVector3(phase.cameraRailSegment.position)),
+        true,
+        "catmullrom",
+        0.5
       ),
-      lookCurve: new THREE.CatmullRomCurve3(
-        profile.cameraPath.lookAts.map((point) => tupleToVector3(point))
+    []
+  );
+  const lookAtCurve = useMemo(
+    () =>
+      new THREE.CatmullRomCurve3(
+        WORLD_PHASES.map((phase) => tupleToVector3(phase.cameraRailSegment.lookAt)),
+        true,
+        "catmullrom",
+        0.5
       ),
-      fovs: profile.cameraPath.fovs,
-    }));
-  }, []);
-
+    []
+  );
+  const fovs = useMemo(
+    () => WORLD_PHASES.map((phase) => phase.cameraRailSegment.fov),
+    []
+  );
   const startupPreview = useMemo(
     () => ({
-      position: tupleToVector3(STARTUP_PROFILE.previewCamera.position),
-      lookAt: tupleToVector3(STARTUP_PROFILE.previewCamera.lookAt),
-      fov: STARTUP_PROFILE.previewCamera.fov,
+      position: tupleToVector3(STARTUP_PHASE.previewCamera.position),
+      lookAt: tupleToVector3(STARTUP_PHASE.previewCamera.lookAt),
+      fov: STARTUP_PHASE.previewCamera.fov,
     }),
     []
   );
-
   const startupSettle = useMemo(
     () => ({
-      position: tupleToVector3(STARTUP_PROFILE.settleCamera.position),
-      lookAt: tupleToVector3(STARTUP_PROFILE.settleCamera.lookAt),
-      fov: STARTUP_PROFILE.settleCamera.fov,
+      position: tupleToVector3(STARTUP_PHASE.settleCamera.position),
+      lookAt: tupleToVector3(STARTUP_PHASE.settleCamera.lookAt),
+      fov: STARTUP_PHASE.settleCamera.fov,
     }),
     []
   );
@@ -63,11 +66,10 @@ export function CameraRig() {
   useEffect(() => {
     if (camera instanceof THREE.PerspectiveCamera) {
       cameraRef.current = camera;
-      const nextCamera = cameraRef.current;
-      nextCamera.position.copy(startupPreview.position);
-      nextCamera.lookAt(startupPreview.lookAt);
-      nextCamera.fov = startupPreview.fov;
-      nextCamera.updateProjectionMatrix();
+      camera.position.copy(startupPreview.position);
+      camera.lookAt(startupPreview.lookAt);
+      camera.fov = startupPreview.fov;
+      camera.updateProjectionMatrix();
     }
   }, [camera, startupPreview]);
 
@@ -75,16 +77,12 @@ export function CameraRig() {
     const perspCam = cameraRef.current;
     if (!perspCam) return;
 
-    const { activeAct, actProgress } = useScrollStore.getState();
+    const { progress } = useScrollStore.getState();
     const startupState = useSceneLoadStore.getState();
-    const act = curves[activeAct];
-    if (!act) return;
+    let targetFov = startupSettle.fov;
+    let allowParallax = startupSequenceComplete.current;
 
-    const t = THREE.MathUtils.clamp(actProgress, 0, 1);
-    let targetFov = act.fovs[0];
-    let allowParallax = true;
-
-    if (activeAct === 0 && !startupSequenceComplete.current) {
+    if (!startupSequenceComplete.current) {
       allowParallax = startupState.stableFrameReady;
 
       if (!startupState.stableFrameReady) {
@@ -99,7 +97,7 @@ export function CameraRig() {
         const settleElapsedMs =
           (state.clock.elapsedTime - startupSettlingStartedAt.current) * 1000;
         const settleT = THREE.MathUtils.clamp(
-          settleElapsedMs / STARTUP_PROFILE.fxLayerBehavior.settleDurationMs,
+          settleElapsedMs / STARTUP_PHASE.fxLayerBehavior.settleDurationMs,
           0,
           1
         );
@@ -122,28 +120,26 @@ export function CameraRig() {
         }
       }
     } else {
-      startupSequenceComplete.current = true;
-      act.posCurve.getPoint(t, targetPos.current);
-      act.lookCurve.getPoint(t, targetLookAt.current);
+      const normalized = THREE.MathUtils.euclideanModulo(progress, 1);
+      positionCurve.getPointAt(normalized, targetPos.current);
+      lookAtCurve.getPointAt(normalized, targetLookAt.current);
 
-      const fovIndex = Math.min(
-        Math.floor(t * (act.fovs.length - 1)),
-        act.fovs.length - 2
-      );
-      const fovT = t * (act.fovs.length - 1) - fovIndex;
-      targetFov = THREE.MathUtils.lerp(
-        act.fovs[fovIndex],
-        act.fovs[fovIndex + 1],
-        fovT
-      );
+      const exactIndex = normalized * WORLD_PHASES.length;
+      const leftIndex = Math.floor(exactIndex) % WORLD_PHASES.length;
+      const rightIndex = (leftIndex + 1) % WORLD_PHASES.length;
+      const localT = exactIndex - Math.floor(exactIndex);
+      targetFov = THREE.MathUtils.lerp(fovs[leftIndex], fovs[rightIndex], localT);
+      allowParallax = true;
     }
 
     if (allowParallax) {
-      targetPos.current.x += mouse.current.x * 0.3;
-      targetPos.current.y += mouse.current.y * 0.15;
+      targetPos.current.x += mouse.current.x * 0.08;
+      targetPos.current.y += mouse.current.y * 0.05;
+      targetLookAt.current.x += mouse.current.x * 0.03;
+      targetLookAt.current.y += mouse.current.y * 0.02;
     }
 
-    const lerpBase = startupSequenceComplete.current ? 0.001 : 0.0004;
+    const lerpBase = startupSequenceComplete.current ? 0.003 : 0.0006;
     const lerpSpeed = 1 - Math.pow(lerpBase, delta);
 
     currentPos.current.lerp(targetPos.current, lerpSpeed);

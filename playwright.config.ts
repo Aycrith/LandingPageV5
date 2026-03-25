@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 const PORT = 3100;
+const HOST = "localhost";
 
 export default defineConfig({
   testDir: "./tests",
@@ -8,7 +9,7 @@ export default defineConfig({
   fullyParallel: false,
   reporter: [["list"]],
   use: {
-    baseURL: `http://127.0.0.1:${PORT}`,
+    baseURL: `http://${HOST}:${PORT}`,
     browserName: "chromium",
     headless: true,
     launchOptions: {
@@ -27,7 +28,7 @@ export default defineConfig({
   },
   webServer: {
     command: `npm run build && npm run start -- -p ${PORT}`,
-    url: `http://127.0.0.1:${PORT}`,
+    url: `http://${HOST}:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,
   },

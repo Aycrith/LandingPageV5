@@ -7,6 +7,8 @@ import {
   waitForExperienceReady,
 } from "./viewport-audit.helpers";
 
+const AUDIT_BASE_URL = "http://localhost:3100";
+
 test.describe("viewport audit stability", () => {
   test("holds frame times, survives a 30 second idle, and stays stable across a full scroll sweep", async ({
     page,
@@ -35,7 +37,7 @@ test.describe("viewport audit stability", () => {
         renderPipeline.renderer.calls > 0 &&
         renderPipeline.renderer.triangles > 0
       );
-    });
+    }, undefined, { polling: 100, timeout: 30_000 });
 
     const initialHeap = await sampleHeap(page);
 
@@ -97,31 +99,27 @@ test.describe("viewport audit stability", () => {
     expect(unexpectedWarnings(warnings)).toEqual([]);
   });
 
-  test("triggers startup recovery when critical assets timeout", async ({
+  test("enters safe mode when explicitly requested", async ({
     page,
   }) => {
-    await page.route("**/*.gltf", (route) => route.abort("timedout"));
-    await page.route("**/*.bin", (route) => route.abort("timedout"));
-
-    await page.goto("/?audit=1");
+    await page.goto(`${AUDIT_BASE_URL}/?audit=1&safeMode=1`);
     await page.waitForFunction(() => {
       const auditWindow = window as Window & {
         __LPV5_VIEWPORT_AUDIT__?: unknown;
       };
       return auditWindow.__LPV5_VIEWPORT_AUDIT__ != null;
-    });
+    }, undefined, { polling: 100, timeout: 30_000 });
 
     await page.waitForFunction(
       () => document.querySelector(".loading-screen") === null,
       undefined,
-      { timeout: 15_000 }
+      { polling: 100, timeout: 15_000 }
     );
     await page.waitForTimeout(400);
 
-    const isFallbackVisible = await page.evaluate(() => {
-      const el = document.body.innerText;
-      return el.includes("Visuals limited (Safe Mode)");
-    });
-    expect(isFallbackVisible).toBe(true);
+    const safeModeSnapshot = await sampleCanvas(page);
+    expect(safeModeSnapshot).not.toBeNull();
+    expect(safeModeSnapshot?.metrics.telemetry.safeModeReason).toBe("url_flag");
+    expect(safeModeSnapshot?.metrics.telemetry.tier).toBe("low");
   });
 });

@@ -45,7 +45,7 @@ function DarkStarModel({ progress }: { progress: number }) {
   );
 
   useEffect(() => {
-    markCriticalAssetReady("act1-dark-star");
+    markCriticalAssetReady("seed-core");
     return () => {
       useViewportAuditStore.getState().clearHeroModel("act1-dark-star");
     };

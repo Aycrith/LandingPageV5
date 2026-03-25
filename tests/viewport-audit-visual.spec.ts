@@ -38,9 +38,9 @@ test.describe("viewport audit visual", () => {
       expect(sample).not.toBeNull();
       expect(sample?.isContextLost).toBeFalsy();
       expect(sample?.metrics.sceneState.activeHeroLabel).toBe(snapshot.heroLabel);
-      expect(sample?.metrics.sceneState.mountedActs).toContain(
-        ACT_SNAPSHOTS.indexOf(snapshot)
-      );
+      for (const act of snapshot.containsActs) {
+        expect(sample?.metrics.sceneState.mountedActs).toContain(act);
+      }
       expect(Object.keys(sample?.metrics.heroModels ?? {})).toEqual([
         snapshot.heroLabel,
       ]);
@@ -59,12 +59,12 @@ test.describe("viewport audit visual", () => {
       expect(sample?.metrics.renderPipeline?.renderer.calls ?? 0).toBeGreaterThan(0);
       expect(sample?.metrics.renderPipeline?.renderer.triangles ?? 0).toBeGreaterThan(0);
 
-      if (snapshot.name === "act5-entry") {
-        expect(sample?.metrics.fxLayers["act5-inner-core"]?.opacity ?? 1).toBeLessThan(
-          0.6
+      if (snapshot.name === "act5-entry" || snapshot.name === "wrap-rebirth") {
+        expect(sample?.metrics.fxLayers["apotheosis-core"]?.opacity ?? 1).toBeLessThan(
+          0.85
         );
-        expect(sample?.metrics.fxLayers["act5-inner-core"]?.scale ?? 1).toBeLessThan(
-          0.5
+        expect(sample?.metrics.fxLayers["apotheosis-core"]?.scale ?? 10).toBeLessThan(
+          2
         );
       }
 

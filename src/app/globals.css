@@ -66,11 +66,40 @@ body {
   pointer-events: auto;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Act sections for scroll height */
 .act-section {
   width: 100%;
   height: 100vh;
   position: relative;
+}
+
+.world-cta-hitbox {
+  position: fixed;
+  left: 50%;
+  bottom: 7.5rem;
+  width: 12rem;
+  height: 4rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: transparent;
+  z-index: 30;
+}
+
+.world-cta-hitbox:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.3);
+  outline-offset: 0.35rem;
 }
 
 /* Loading screen */

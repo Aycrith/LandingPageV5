@@ -1,83 +1,65 @@
 "use client";
 
-import { useMemo } from "react";
-import {
-  Bloom,
-  ChromaticAberration,
-  EffectComposer,
-  Vignette,
-} from "@react-three/postprocessing";
+import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
-import * as THREE from "three";
 import { useCapsStore } from "@/stores/capsStore";
 import { useScrollStore } from "@/stores/scrollStore";
-import { ACT_VIEWPORT_PROFILES } from "../viewportProfiles";
+import { WORLD_PHASES } from "../viewportProfiles";
+
+function nextPhaseIndex(index: number) {
+  return (index + 1) % WORLD_PHASES.length;
+}
 
 export function PostProcessingStack() {
   const caps = useCapsStore((state) => state.caps);
   const activeAct = useScrollStore((state) => state.activeAct);
-
-  const profile = ACT_VIEWPORT_PROFILES[activeAct];
-  const tierOverride =
-    caps?.tier != null ? profile.tierOverrides[caps.tier] : undefined;
-
-  const bloomIntensity =
-    profile.postFxProfile.bloomIntensity *
-    (tierOverride?.bloomIntensityMultiplier ?? 1);
-  const bloomThreshold =
-    profile.postFxProfile.bloomThreshold +
-    (tierOverride?.bloomThresholdOffset ?? 0);
-  const vignetteDarkness =
-    profile.postFxProfile.vignetteDarkness *
-    (tierOverride?.vignetteDarknessMultiplier ?? 1);
-  const chromaticOffset =
-    profile.postFxProfile.chromaticOffset *
-    (tierOverride?.chromaticOffsetMultiplier ?? 1);
-
-  const chromaticVector = useMemo(
-    () => new THREE.Vector2(chromaticOffset, chromaticOffset),
-    [chromaticOffset]
-  );
+  const actProgress = useScrollStore((state) => state.actProgress);
 
   if (!caps || !caps.enablePostProcessing) {
     return null;
   }
 
-  if (chromaticOffset > 0) {
-    return (
-      <EffectComposer multisampling={0}>
-        <Bloom
-          luminanceThreshold={bloomThreshold}
-          luminanceSmoothing={profile.postFxProfile.bloomSmoothing}
-          intensity={bloomIntensity}
-          mipmapBlur
-        />
-        <Vignette
-          offset={profile.postFxProfile.vignetteOffset}
-          darkness={vignetteDarkness}
-          blendFunction={BlendFunction.NORMAL}
-        />
-        <ChromaticAberration
-          offset={chromaticVector}
-          blendFunction={BlendFunction.NORMAL}
-          radialModulation={false}
-          modulationOffset={0}
-        />
-      </EffectComposer>
-    );
-  }
+  const currentProfile = WORLD_PHASES[activeAct];
+  const nextProfile = WORLD_PHASES[nextPhaseIndex(activeAct)];
+  const tierOverride =
+    caps.tier != null ? currentProfile.tierOverrides[caps.tier] : undefined;
+
+  const bloomThreshold =
+    currentProfile.postFxProfile.bloomThreshold +
+    (tierOverride?.bloomThresholdOffset ?? 0);
+  const bloomIntensity =
+    currentProfile.postFxProfile.bloomIntensity *
+    (tierOverride?.bloomIntensityMultiplier ?? 1);
+  const nextBloomThreshold = nextProfile.postFxProfile.bloomThreshold;
+  const nextBloomIntensity = nextProfile.postFxProfile.bloomIntensity;
+  const vignetteDarkness =
+    currentProfile.postFxProfile.vignetteDarkness *
+    (tierOverride?.vignetteDarknessMultiplier ?? 1);
 
   return (
     <EffectComposer multisampling={0}>
       <Bloom
-        luminanceThreshold={bloomThreshold}
-        luminanceSmoothing={profile.postFxProfile.bloomSmoothing}
-        intensity={bloomIntensity}
+        luminanceThreshold={
+          bloomThreshold + (nextBloomThreshold - bloomThreshold) * actProgress
+        }
+        luminanceSmoothing={0.025}
+        intensity={
+          bloomIntensity + (nextBloomIntensity - bloomIntensity) * actProgress
+        }
         mipmapBlur
       />
       <Vignette
-        offset={profile.postFxProfile.vignetteOffset}
-        darkness={vignetteDarkness}
+        offset={
+          currentProfile.postFxProfile.vignetteOffset +
+          (nextProfile.postFxProfile.vignetteOffset -
+            currentProfile.postFxProfile.vignetteOffset) *
+            actProgress
+        }
+        darkness={
+          vignetteDarkness +
+          (nextProfile.postFxProfile.vignetteDarkness - vignetteDarkness) *
+            actProgress
+        }
         blendFunction={BlendFunction.NORMAL}
       />
     </EffectComposer>

@@ -4,42 +4,59 @@ export const ACT_SNAPSHOTS = [
   {
     name: "act1-entry",
     progress: 0.06,
-    heroLabel: "act1-dark-star",
-    maxTransparentCount: 32,
+    heroLabel: "seed-core",
+    maxTransparentCount: 20,
+    containsActs: [0, 1],
   },
   {
     name: "act2-entry",
     progress: 0.26,
-    heroLabel: "act2-globe",
-    maxTransparentCount: 26,
+    heroLabel: "scaffold-shell",
+    maxTransparentCount: 18,
+    containsActs: [1, 2],
   },
   {
     name: "act3-entry",
     progress: 0.46,
-    heroLabel: "act3-hologram",
-    maxTransparentCount: 24,
+    heroLabel: "circulation-core",
+    maxTransparentCount: 18,
+    containsActs: [2, 3],
   },
   {
     name: "act4-entry",
     progress: 0.66,
-    heroLabel: "act4-paradox",
-    maxTransparentCount: 28,
+    heroLabel: "sentience-bridge",
+    maxTransparentCount: 19,
+    containsActs: [3, 4],
   },
   {
     name: "act5-entry",
     progress: 0.86,
-    heroLabel: "act5-black-hole",
+    heroLabel: "apotheosis-crown",
     maxTransparentCount: 22,
+    containsActs: [4, 0],
+  },
+  {
+    name: "wrap-rebirth",
+    progress: 0.98,
+    heroLabel: "apotheosis-crown",
+    maxTransparentCount: 18,
+    containsActs: [4, 0],
   },
 ] as const;
 
+const AUDIT_BASE_URL = "http://localhost:3100";
+
 export async function waitForExperienceReady(page: Page, search = "") {
-  await page.goto(`/${search}`);
-  await page.waitForFunction(() => window.__LPV5_VIEWPORT_AUDIT__ != null);
+  await page.goto(`${AUDIT_BASE_URL}/${search}`);
+  await page.waitForFunction(() => window.__LPV5_VIEWPORT_AUDIT__ != null, undefined, {
+    polling: 100,
+    timeout: 30_000,
+  });
   await page.waitForFunction(
     () => document.querySelector(".loading-screen") === null,
     undefined,
-    { timeout: 30_000 }
+    { polling: 100, timeout: 30_000 }
   );
   await page.waitForTimeout(400);
 }
