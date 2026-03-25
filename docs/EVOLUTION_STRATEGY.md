@@ -30,7 +30,17 @@ The project is a 5-act scroll-driven 3D experience built on:
 
 ### Evolution Dimensions Still Open
 
-#### Phase 2: Metamorphic Geometry (Next)
+#### Next Immediate Step: Tuning & Instrumentation Pass
+- [x] Baseline alignment and acceptance criteria
+- [x] Startup hardening (fail-safe gate)
+- [x] Failure fallback path
+- [x] Tier-testability (`?forceTier=high`)
+- [x] Codified budgets in `capsStore.ts`
+- [x] Extended telemetry to `ViewportAuditProbe`
+- [x] Test coverage expansion
+- [x] Phase D mini-spike (threshold warnings)
+
+#### Phase 2: Metamorphic Geometry
 - Morph hero geometry between acts along the spline (Dark Star → Globe → Flow Surface → Quantum → Black Hole → Dark Star)
 - Use `THREE.BufferGeometryUtils.mergeVertices` + vertex interpolation
 - Each act's hero geometry becomes a waypoint in a shape-morphing timeline
@@ -64,7 +74,10 @@ The project is a 5-act scroll-driven 3D experience built on:
 | Draw calls | < 100 | < 50 |
 | Texture memory | < 128MB | < 64MB |
 | Load time | < 3s | < 5s |
-| Act transition | < 16ms (1 frame) | < 33ms (1 frame) |
+| Frame latency (ms) | < 16.6ms | < 33.3ms |
+| Memory limits   | < 512MB JS Heap | < 256MB JS Heap |
+| Geometry Budget | < 100k verts | < 50k verts |
+| Startup Resilience | Must never stall | Fallback to safe mode > 6s |
 
 ## Dev vs Build Behavior
 
