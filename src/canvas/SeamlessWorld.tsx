@@ -87,8 +87,8 @@ export function SeamlessWorld({
 
   const weights = useMemo(() => {
     const currentWeight =
-      1 - THREE.MathUtils.smootherstep(phaseBlend, 0.08, 0.86);
-    const nextWeight = THREE.MathUtils.smootherstep(phaseBlend, 0.46, 0.98);
+      1 - THREE.MathUtils.smootherstep(phaseBlend, 0.12, 0.78);
+    const nextWeight = THREE.MathUtils.smootherstep(phaseBlend, 0.56, 0.96);
     // Ensure the array always has at least 6 slots for Act 6 support
     const len = Math.max(WORLD_PHASES.length, 6);
     const list = Array.from({ length: len }, () => 0);
@@ -97,8 +97,20 @@ export function SeamlessWorld({
     return list;
   }, [activeAct, nextAct, phaseBlend]);
 
+  // Sentience bridge: curved arc spanning the dual poles
+  const sentienceBridgeCurve = useMemo(
+    () =>
+      new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.5, 0, 0),
+        new THREE.Vector3(-0.16, 0.3, 0),
+        new THREE.Vector3(0, 0.38, 0),
+        new THREE.Vector3(0.16, 0.3, 0),
+        new THREE.Vector3(0.5, 0, 0),
+      ]),
+    []
+  );
+
   const chamberRef = useRef<THREE.Mesh>(null);
-  const auraRef = useRef<THREE.Mesh>(null);
   const seedGroupRef = useRef<THREE.Group>(null);
   const scaffoldGroupRef = useRef<THREE.Group>(null);
   const scaffoldNodesRef = useRef<THREE.InstancedMesh>(null);
@@ -266,13 +278,6 @@ export function SeamlessWorld({
       chamberRef.current.rotation.y = t * 0.01;
     }
 
-    if (auraRef.current) {
-      auraRef.current.position.copy(worldAnchor);
-      auraRef.current.scale.setScalar(0.86 + seedWeight * 0.14 + apotheosisWeight * 0.18 + Math.sin(t * 0.88) * 0.012);
-      const auraMaterial = auraRef.current.material as THREE.MeshBasicMaterial;
-      auraMaterial.opacity = 0.03 + seedWeight * 0.03 + apotheosisWeight * 0.05 + cursorProximity * 0.04;
-    }
-
     fogColor
       .set(currentProfile.fogProfile.color)
       .lerp(new THREE.Color(nextProfile.fogProfile.color), phaseBlend);
@@ -326,7 +331,7 @@ export function SeamlessWorld({
     if (seedGroupRef.current) {
       seedGroupRef.current.position.copy(worldAnchor);
       seedGroupRef.current.rotation.y = t * 0.18;
-      seedGroupRef.current.visible = seedWeight > 0.02;
+      seedGroupRef.current.visible = seedWeight > 0.005;
       seedGroupRef.current.scale.setScalar(1 + rebirthBlend * 0.24);
       seedGroupRef.current.children.forEach((child) => {
         const mesh = child as THREE.Mesh;
@@ -337,7 +342,7 @@ export function SeamlessWorld({
 
     if (scaffoldGroupRef.current) {
       scaffoldGroupRef.current.position.copy(worldAnchor);
-      scaffoldGroupRef.current.visible = scaffoldWeight > 0.02;
+      scaffoldGroupRef.current.visible = scaffoldWeight > 0.005;
       scaffoldGroupRef.current.rotation.y = t * 0.08;
       scaffoldGroupRef.current.scale.setScalar(1 + Math.sin(t * 0.62) * 0.006);
       scaffoldGroupRef.current.children.forEach((child, index) => {
@@ -350,26 +355,29 @@ export function SeamlessWorld({
     }
 
     if (scaffoldNodesRef.current) {
-      for (let i = 0; i < scaffoldNodes.length; i++) {
-        const node = scaffoldNodes[i];
-        dummy.position.set(
-          Math.cos(node.angle + t * 0.08) * node.radius,
-          node.y + Math.sin(t * 0.28 + node.angle) * 0.08,
-          Math.sin(node.angle + t * 0.08) * node.radius * 0.68
-        );
-        dummy.scale.setScalar(node.scale * (0.6 + scaffoldWeight * 0.7));
-        dummy.updateMatrix();
-        scaffoldNodesRef.current.setMatrixAt(i, dummy.matrix);
+      scaffoldNodesRef.current.visible = scaffoldWeight > 0.005;
+      if (scaffoldWeight > 0.005) {
+        for (let i = 0; i < scaffoldNodes.length; i++) {
+          const node = scaffoldNodes[i];
+          dummy.position.set(
+            Math.cos(node.angle + t * 0.08) * node.radius,
+            node.y + Math.sin(t * 0.28 + node.angle) * 0.08,
+            Math.sin(node.angle + t * 0.08) * node.radius * 0.68
+          );
+          dummy.scale.setScalar(node.scale * (0.6 + scaffoldWeight * 0.7));
+          dummy.updateMatrix();
+          scaffoldNodesRef.current.setMatrixAt(i, dummy.matrix);
+        }
+        scaffoldNodesRef.current.instanceMatrix.needsUpdate = true;
+        const material = scaffoldNodesRef.current.material as THREE.MeshPhysicalMaterial;
+        material.opacity = scaffoldWeight * 0.32;
+        material.emissiveIntensity = 0.08 + scaffoldWeight * (0.22 + Math.sin(t * 1.8) * 0.14);
       }
-      scaffoldNodesRef.current.instanceMatrix.needsUpdate = true;
-      const material = scaffoldNodesRef.current.material as THREE.MeshPhysicalMaterial;
-      material.opacity = scaffoldWeight * 0.32; // capped to support hero, not compete
-      material.emissiveIntensity = 0.08 + scaffoldWeight * (0.22 + Math.sin(t * 1.8) * 0.14);
     }
 
     if (circulationGroupRef.current) {
       circulationGroupRef.current.position.copy(worldAnchor);
-      circulationGroupRef.current.visible = circulationWeight > 0.02;
+      circulationGroupRef.current.visible = circulationWeight > 0.005;
       circulationGroupRef.current.rotation.z = Math.sin(t * 0.14) * 0.02;
       circulationGroupRef.current.children.forEach((child, index) => {
         const mesh = child as THREE.Mesh;
@@ -380,52 +388,59 @@ export function SeamlessWorld({
     }
 
     if (sentienceBridgeRef.current) {
-      sentienceBridgeRef.current.visible = sentienceWeight > 0.02;
+      sentienceBridgeRef.current.visible = sentienceWeight > 0.005;
       sentienceBridgeRef.current.position.copy(worldAnchor).add(new THREE.Vector3(0, -0.14, -0.12));
       sentienceBridgeRef.current.scale.x = 1.2 + sentienceWeight * 1.2;
+      sentienceBridgeRef.current.scale.y = 0.3 + Math.abs(Math.sin(t * 0.8)) * 0.5 * sentienceWeight;
       const material =
         sentienceBridgeRef.current.material as THREE.MeshPhysicalMaterial;
       material.opacity = sentienceWeight * 0.34;
-      material.emissiveIntensity = 0.14 + sentienceWeight * (0.38 + Math.sin(t * 2.1) * 0.16);
+      material.emissiveIntensity = 0.14 + sentienceWeight * (0.38 + Math.sin(t * 2.4) * 0.16);
     }
 
+    const apotheosisActive = apotheosisWeight > 0.005 || rebirthBlend > 0.005;
     if (apotheosisGroupRef.current) {
       apotheosisGroupRef.current.position.copy(worldAnchor);
-      apotheosisGroupRef.current.visible = apotheosisWeight > 0.02 || rebirthBlend > 0.02;
+      apotheosisGroupRef.current.visible = apotheosisActive;
     }
     if (crownRingRef.current && crownSecondaryRef.current) {
-      crownRingRef.current.rotation.z = t * 0.14;
-      crownSecondaryRef.current.rotation.x = t * 0.18;
-      crownRingRef.current.scale.setScalar(0.8 + apotheosisWeight * 0.82);
-      crownSecondaryRef.current.scale.setScalar(0.64 + apotheosisWeight * 0.64);
-      const ringMat = crownRingRef.current.material as THREE.MeshBasicMaterial;
-      const secondaryMat =
-        crownSecondaryRef.current.material as THREE.MeshBasicMaterial;
-      ringMat.opacity = apotheosisWeight * 0.22;
-      secondaryMat.opacity = apotheosisWeight * 0.14;
+      if (apotheosisActive) {
+        crownRingRef.current.rotation.z = t * 0.14;
+        crownSecondaryRef.current.rotation.x = t * 0.18;
+        crownRingRef.current.scale.setScalar(0.8 + apotheosisWeight * 0.82);
+        crownSecondaryRef.current.scale.setScalar(0.64 + apotheosisWeight * 0.64);
+        const ringMat = crownRingRef.current.material as THREE.MeshBasicMaterial;
+        const secondaryMat =
+          crownSecondaryRef.current.material as THREE.MeshBasicMaterial;
+        ringMat.opacity = apotheosisWeight * 0.22;
+        secondaryMat.opacity = apotheosisWeight * 0.14;
+      }
     }
     if (crownSpinesRef.current) {
-      for (let i = 0; i < crownSpines.length; i++) {
-        const spine = crownSpines[i];
-        const radius = 1.82 + apotheosisWeight * 0.88;
-        dummy.position.set(
-          Math.cos(spine.angle + t * 0.05) * radius,
-          0.18 + spine.height * 0.42,
-          Math.sin(spine.angle + t * 0.05) * radius
-        );
-        dummy.lookAt(0, 0.12, 0);
-        dummy.rotateX(Math.PI / 2);
-        dummy.scale.set(
-          spine.width,
-          0.18 + apotheosisWeight * spine.height,
-          spine.width
-        );
-        dummy.updateMatrix();
-        crownSpinesRef.current.setMatrixAt(i, dummy.matrix);
+      crownSpinesRef.current.visible = apotheosisActive;
+      if (apotheosisActive) {
+        for (let i = 0; i < crownSpines.length; i++) {
+          const spine = crownSpines[i];
+          const radius = 1.82 + apotheosisWeight * 0.88;
+          dummy.position.set(
+            Math.cos(spine.angle + t * 0.05) * radius,
+            0.18 + spine.height * 0.42,
+            Math.sin(spine.angle + t * 0.05) * radius
+          );
+          dummy.lookAt(0, 0.12, 0);
+          dummy.rotateX(Math.PI / 2);
+          dummy.scale.set(
+            spine.width,
+            0.18 + apotheosisWeight * spine.height,
+            spine.width
+          );
+          dummy.updateMatrix();
+          crownSpinesRef.current.setMatrixAt(i, dummy.matrix);
+        }
+        crownSpinesRef.current.instanceMatrix.needsUpdate = true;
+        const material = crownSpinesRef.current.material as THREE.MeshStandardMaterial;
+        material.emissiveIntensity = 0.08 + apotheosisWeight * 0.4;
       }
-      crownSpinesRef.current.instanceMatrix.needsUpdate = true;
-      const material = crownSpinesRef.current.material as THREE.MeshStandardMaterial;
-      material.emissiveIntensity = 0.08 + apotheosisWeight * 0.4;
     }
 
     if (sporesRef.current && baseSporePositionsRef.current) {
@@ -572,17 +587,6 @@ export function SeamlessWorld({
         />
       </mesh>
 
-      <mesh ref={auraRef}>
-        <sphereGeometry args={[0.84, 24, 24]} />
-        <meshBasicMaterial
-          color="#8af4dd"
-          transparent
-          opacity={0.04}
-          depthWrite={false}
-          toneMapped={false}
-        />
-      </mesh>
-
       <group ref={seedGroupRef}>
         <mesh rotation={[Math.PI / 2, 0.16, 0]}>
           <torusGeometry args={[1.2, 0.032, 16, 96]} />
@@ -662,17 +666,17 @@ export function SeamlessWorld({
         ))}
       </group>
 
-      <mesh ref={sentienceBridgeRef} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.05, 0.08, 1, 18]} />
+      <mesh ref={sentienceBridgeRef}>
+        <tubeGeometry args={[sentienceBridgeCurve, 32, 0.04, 8, false]} />
         <meshPhysicalMaterial
-          color="#f3cf98"
-          emissive="#ffd3ee"
+          color="#f6c86a"
+          emissive="#ffd06f"
           emissiveIntensity={0.24}
           transparent
           opacity={0.24}
           transmission={0.54}
           thickness={0.58}
-          roughness={0.16}
+          roughness={0.12}
           depthWrite={false}
         />
       </mesh>

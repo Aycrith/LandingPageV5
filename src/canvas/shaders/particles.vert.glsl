@@ -6,6 +6,9 @@ uniform vec3 uAccentColor;
 uniform sampler2D uNoiseTexture;
 uniform float uOpacityScale;
 uniform float uSizeScale;
+uniform vec3 uGravityPos;
+uniform float uGravityStrength;
+uniform float uVortexStrength;
 
 attribute vec3 aRandom;
 attribute float aSize;
@@ -108,11 +111,14 @@ void main() {
   pos.y -= windStrength * (0.5 + aRandom.x * 0.5);
   pos.x += windStrength * aRandom.y * 0.3;
 
-  // Cursor attraction well
-  vec3 toMouse = vec3(uMouse.x * 5.0, uMouse.y * 5.0, 0.0) - pos;
-  float mouseDist = length(toMouse);
-  float mouseInfluence = smoothstep(8.0, 0.5, mouseDist) * 0.5;
-  pos += normalize(toMouse + vec3(0.001)) * mouseInfluence;
+  // Gravity well — driven by ForceRegistry (per-act strength via motionRig.pointerInfluence)
+  vec3 toWell = uGravityPos - pos;
+  float wellDist = length(toWell);
+  float wellInfluence = smoothstep(8.0, 0.5, wellDist) * clamp(uGravityStrength * 0.07, 0.0, 1.0);
+  pos += normalize(toWell + vec3(0.001)) * wellInfluence;
+
+  // Inward vortex pull — Act 5 Apotheosis spiral
+  pos += (-pos * 0.02) * uVortexStrength;
 
   // Project
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);

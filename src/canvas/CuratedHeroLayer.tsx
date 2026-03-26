@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -918,50 +918,65 @@ export function CuratedHeroLayer({
 
   return (
     <>
-      <SeedHero
-        profile={WORLD_PHASES[0]}
-        reportMetric={activeMetricIndex === 0}
-        weight={weights[0] + rebirthBlend}
-        worldAnchor={worldAnchor}
-        pointerOffset={pointerOffset}
-        runtimeCaps={runtimeCaps}
-      />
-      <ScaffoldHero
-        profile={WORLD_PHASES[1]}
-        reportMetric={activeMetricIndex === 1}
-        weight={weights[1]}
-        worldAnchor={worldAnchor}
-        pointerOffset={pointerOffset}
-        runtimeCaps={runtimeCaps}
-      />
-      <CirculationHero
-        profile={WORLD_PHASES[2]}
-        reportMetric={activeMetricIndex === 2}
-        weight={weights[2]}
-        worldAnchor={worldAnchor}
-        pointerOffset={pointerOffset}
-        runtimeCaps={runtimeCaps}
-      />
-      <SentienceHero
-        profile={WORLD_PHASES[3]}
-        reportMetric={activeMetricIndex === 3}
-        weight={weights[3]}
-        worldAnchor={worldAnchor}
-        pointerOffset={pointerOffset}
-        runtimeCaps={runtimeCaps}
-      />
-      <ApotheosisHero
-        profile={WORLD_PHASES[4]}
-        reportMetric={activeMetricIndex === 4}
-        weight={weights[4]}
-        worldAnchor={worldAnchor}
-        pointerOffset={pointerOffset}
-        runtimeCaps={runtimeCaps}
-      />
-      <Act6QuantumConsciousness
-        progress={weights[5] ?? 0}
-        visible={(weights[5] ?? 0) > 0.01}
-      />
+      {/* Each hero has its own Suspense boundary so they mount independently as their
+          GLTFs resolve. Without this, a single shared boundary blocks all heroes until
+          every model is loaded — preventing SeedHero from marking seed-core ready. */}
+      <Suspense fallback={null}>
+        <SeedHero
+          profile={WORLD_PHASES[0]}
+          reportMetric={activeMetricIndex === 0}
+          weight={weights[0] + rebirthBlend}
+          worldAnchor={worldAnchor}
+          pointerOffset={pointerOffset}
+          runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <ScaffoldHero
+          profile={WORLD_PHASES[1]}
+          reportMetric={activeMetricIndex === 1}
+          weight={weights[1]}
+          worldAnchor={worldAnchor}
+          pointerOffset={pointerOffset}
+          runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <CirculationHero
+          profile={WORLD_PHASES[2]}
+          reportMetric={activeMetricIndex === 2}
+          weight={weights[2]}
+          worldAnchor={worldAnchor}
+          pointerOffset={pointerOffset}
+          runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <SentienceHero
+          profile={WORLD_PHASES[3]}
+          reportMetric={activeMetricIndex === 3}
+          weight={weights[3]}
+          worldAnchor={worldAnchor}
+          pointerOffset={pointerOffset}
+          runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <ApotheosisHero
+          profile={WORLD_PHASES[4]}
+          reportMetric={activeMetricIndex === 4}
+          weight={weights[4]}
+          worldAnchor={worldAnchor}
+          pointerOffset={pointerOffset}
+          runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Act6QuantumConsciousness
+          progress={weights[5] ?? 0}
+          visible={(weights[5] ?? 0) > 0.01}
+        />
+      </Suspense>
     </>
   );
 }

@@ -3,7 +3,6 @@
 import { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { MicrotubuleMaterial } from "@/canvas/materials/MicrotubuleMaterial";
 import { seededUnit, seededSigned } from "@/lib/random";
 import { useCapsStore } from "@/stores/capsStore";
 
@@ -26,9 +25,11 @@ function MicrotubuleLattice({
   const sphereCount = tier === "high" ? 1200 : tier === "medium" ? 600 : 200;
 
   const instancedRef = useRef<THREE.InstancedMesh>(null);
+  const latticeMaterialRef = useRef<THREE.MeshPhysicalMaterial>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   // Hexagonal tunnel lattice — deterministic positions
+  // Z range [-2, 14]: near end at Z=-2 near camera, far end extending away into void
   const latticeData = useMemo(() => {
     const data: Array<{
       x: number;
@@ -39,7 +40,7 @@ function MicrotubuleLattice({
     const ringsNeeded = Math.ceil(sphereCount / 12);
 
     for (let ring = 0; ring < ringsNeeded && data.length < sphereCount; ring++) {
-      const z = (ring / ringsNeeded) * 24 - 12;
+      const z = (ring / ringsNeeded) * 16 - 2;
       const seed = ring * 31;
 
       // Outer hex ring (6 spheres)
@@ -83,13 +84,103 @@ function MicrotubuleLattice({
       instancedRef.current.setMatrixAt(i, dummy.matrix);
     }
     instancedRef.current.instanceMatrix.needsUpdate = true;
+
+    if (latticeMaterialRef.current) {
+      latticeMaterialRef.current.emissiveIntensity = 0.8 + Math.sin(t * 1.8) * 0.4;
+    }
   });
 
   return (
-    <instancedMesh ref={instancedRef} args={[undefined, undefined, latticeData.length]}>
-      <sphereGeometry args={[1, 8, 8]} />
-      <MicrotubuleMaterial color="#00ccff" glowIntensity={1.2} />
-    </instancedMesh>
+    <>
+      <instancedMesh ref={instancedRef} args={[undefined, undefined, latticeData.length]}>
+        <sphereGeometry args={[1, 8, 8]} />
+        <meshPhysicalMaterial
+          ref={latticeMaterialRef}
+          color="#001122"
+          emissive="#00ccff"
+          emissiveIntensity={0.8}
+          transmission={0.72}
+          roughness={0.06}
+          metalness={0.0}
+          transparent
+          depthWrite={false}
+          toneMapped={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </instancedMesh>
+      <LatticeSpines latticeData={latticeData} progress={progress} visible={visible} />
+    </>
+  );
+}
+
+// ── Lattice Spines ────────────────────────────────────────────────────────────
+
+function LatticeSpines({
+  latticeData,
+  progress,
+  visible,
+}: {
+  latticeData: Array<{ x: number; y: number; z: number; phase: number }>;
+  progress: number;
+  visible: boolean;
+}) {
+  const matRef = useRef<THREE.LineBasicMaterial>(null);
+
+  // Build spine positions: connect adjacent outer and inner nodes per ring
+  // Each ring has 12 nodes (indices 0-5 outer, 6-11 inner)
+  const spinePositions = useMemo(() => {
+    const ringsNeeded = Math.ceil(latticeData.length / 12);
+    const edges: number[] = [];
+
+    for (let ring = 0; ring < ringsNeeded; ring++) {
+      const base = ring * 12;
+      if (base + 11 >= latticeData.length) break;
+
+      for (let k = 0; k < 6; k++) {
+        const outerA = latticeData[base + k];
+        const outerB = latticeData[base + ((k + 1) % 6)];
+        const innerA = latticeData[base + 6 + k];
+        const innerB = latticeData[base + 6 + ((k + 1) % 6)];
+
+        // Outer ring edge
+        edges.push(outerA.x, outerA.y, outerA.z, outerB.x, outerB.y, outerB.z);
+        // Inner ring edge
+        edges.push(innerA.x, innerA.y, innerA.z, innerB.x, innerB.y, innerB.z);
+        // Cross edge outer→inner
+        edges.push(outerA.x, outerA.y, outerA.z, innerA.x, innerA.y, innerA.z);
+      }
+    }
+    return new Float32Array(edges);
+  }, [latticeData]);
+
+  useFrame((state) => {
+    if (!matRef.current || !visible) return;
+    const t = state.clock.elapsedTime;
+    const appear = Math.min(progress / 0.25, 1);
+    const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
+    matRef.current.opacity = (0.08 + Math.sin(t * 1.2) * 0.03) * appear * fadeOut;
+  });
+
+  if (spinePositions.length === 0) return null;
+
+  return (
+    <lineSegments>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          args={[spinePositions, 3]}
+        />
+      </bufferGeometry>
+      <lineBasicMaterial
+        ref={matRef}
+        color="#00ccff"
+        transparent
+        opacity={0}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </lineSegments>
   );
 }
 
@@ -104,17 +195,22 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
 
   const linesRef = useRef<THREE.Group>(null);
   const firePhase = useRef<Float32Array>(new Float32Array(DENDRITE_COUNT).fill(-1));
+  // Frame-rate-independent firing: track next fire time as absolute clock time
+  const nextFireTime = useRef<Float32Array>(
+    new Float32Array(DENDRITE_COUNT).map((_, i) => seededUnit(i * 13) * 3.0)
+  );
 
   // Dendrite paths: CatmullRomCurve3 with 6 seeded control points
+  // Constrained to lattice radius ±2.2 in X/Y
   const curves = useMemo(() => {
     return Array.from({ length: DENDRITE_COUNT }, (_, i) => {
       const seed = i * 17;
       const points = Array.from({ length: 6 }, (__, k) => {
         const t = k / 5;
         return new THREE.Vector3(
-          seededSigned(seed + k) * 4.5,
-          seededSigned(seed + k + 100) * 4.5,
-          t * 20 - 10 + seededSigned(seed + k + 200) * 2
+          seededSigned(seed + k) * 2.2,
+          seededSigned(seed + k + 100) * 2.2,
+          t * 16 - 2 + seededSigned(seed + k + 200) * 1.5
         );
       });
       return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
@@ -128,6 +224,13 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
     []
   );
   const scratchRef = useRef<Float32Array[]>(positions);
+
+  // Vertex colors for traveling action-potential wave
+  const vertexColors = useMemo(
+    () => curves.map(() => new Float32Array(32 * 3)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   // Fire intervals: each dendrite fires every 1.5–4.5s
   const fireIntervals = useMemo(
@@ -144,10 +247,11 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
       const line = linesRef.current.children[i] as THREE.Line;
       if (!line) continue;
 
-      // Trigger fire events
+      // Trigger fire events — absolute time tracking, frame-rate independent
       const interval = fireIntervals[i];
-      if (firePhase.current[i] < 0 && (t % interval) < 0.05) {
+      if (firePhase.current[i] < 0 && t >= nextFireTime.current[i]) {
         firePhase.current[i] = t;
+        nextFireTime.current[i] = t + interval;
       }
       const phase = firePhase.current[i] >= 0 ? (t - firePhase.current[i]) / 0.8 : -1;
       if (phase > 1) firePhase.current[i] = -1;
@@ -166,16 +270,27 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
       arr.set(pts);
       posAttr.needsUpdate = true;
 
-      // Color: resting dark red, firing orange → white
+      // Traveling action-potential wave: per-vertex color, bright zone at wavefront
       const mat = line.material as THREE.LineBasicMaterial;
-      if (phase >= 0 && phase <= 1) {
-        const flash = Math.sin(phase * Math.PI);
-        mat.color.setRGB(1.0, 0.2 + flash * 0.6, flash * 0.8);
-        mat.opacity = (0.15 + flash * 0.75) * appear;
-      } else {
-        mat.color.setRGB(0.4, 0.05, 0.02);
-        mat.opacity = 0.08 * appear;
+      const colAttr = line.geometry.attributes.color as THREE.BufferAttribute;
+      if (colAttr) {
+        const colArr = colAttr.array as Float32Array;
+        for (let j = 0; j < 32; j++) {
+          const tVertex = j / 31;
+          const waveProximity = phase >= 0
+            ? Math.max(0, 1 - Math.abs(tVertex - phase) / 0.2)
+            : 0;
+          const wave = waveProximity * waveProximity;
+          // Lerp: resting (#001a44) → peak (#00ffee → #ffffff)
+          colArr[j * 3]     = wave;              // R: 0 → 1
+          colArr[j * 3 + 1] = 0.102 + wave * 0.898; // G: 0.102 → 1.0
+          colArr[j * 3 + 2] = 0.267 + wave * 0.666; // B: 0.267 → 0.933
+        }
+        colAttr.needsUpdate = true;
       }
+      mat.opacity = phase >= 0
+        ? (0.08 + 0.62 * Math.sin(phase * Math.PI)) * appear
+        : 0.08 * appear;
     }
   });
 
@@ -188,11 +303,15 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
               attach="attributes-position"
               args={[positions[i], 3]}
             />
+            <bufferAttribute
+              attach="attributes-color"
+              args={[vertexColors[i], 3]}
+            />
           </bufferGeometry>
           <lineBasicMaterial
             transparent
             opacity={0.08}
-            color="#661100"
+            vertexColors
             blending={THREE.AdditiveBlending}
             depthWrite={false}
             toneMapped={false}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { ACT_VIEWPORT_PROFILES } from "./viewportProfiles";
 import {
@@ -14,6 +14,53 @@ const STABLE_FRAME_THRESHOLD =
 
 export function StartupReadinessGate() {
   const stableFrames = useRef(0);
+  const intervalStableCount = useRef(0);
+  // Track when this gate first started processing frames. Using a local ref
+  // rather than startupStartedAt ensures the timeout is relative to when the
+  // canvas is actually rendering, not to store or module initialisation time.
+  // In dev mode Turbopack JIT-compilation can consume several seconds before
+  // the first frame fires, which would prematurely exhaust the startup budget.
+  const gateOpenAt = useRef<number | null>(null);
+
+  // Interval-based parallel path: marks stableFrameReady even when the
+  // WebGL/rAF loop is throttled (headless Playwright, background tabs).
+  // Runs every 100 ms — semantically "N consecutive calm checks" instead of
+  // "N rendered frames". The useFrame path below fires first on real hardware.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const state = useSceneLoadStore.getState();
+      const capsState = useCapsStore.getState();
+
+      if (state.stableFrameReady || state.hasFallbackTriggered) {
+        clearInterval(id);
+        return;
+      }
+
+      const MAX_MS = capsState.caps?.budgets.loadTimeMs ?? 6000;
+      if (gateOpenAt.current === null) gateOpenAt.current = Date.now();
+      const elapsed = Date.now() - gateOpenAt.current;
+
+      if (!areCriticalAssetsReady(state)) {
+        intervalStableCount.current = 0;
+        if (elapsed > MAX_MS) {
+          state.markFallbackTriggered();
+          clearInterval(id);
+        }
+        return;
+      }
+
+      intervalStableCount.current += 1;
+      if (intervalStableCount.current >= STABLE_FRAME_THRESHOLD) {
+        state.markStableFrameReady();
+        clearInterval(id);
+      } else if (elapsed > MAX_MS + 2000) {
+        state.markFallbackTriggered();
+        clearInterval(id);
+      }
+    }, 100);
+
+    return () => clearInterval(id);
+  }, []);
 
   useFrame(() => {
     const state = useSceneLoadStore.getState();
@@ -22,8 +69,13 @@ export function StartupReadinessGate() {
 
     if (state.stableFrameReady || state.hasFallbackTriggered) return;
 
+    if (gateOpenAt.current === null) {
+      gateOpenAt.current = Date.now();
+    }
+    const elapsed = Date.now() - gateOpenAt.current;
+
     if (!areCriticalAssetsReady(state)) {
-      if (Date.now() - state.startupStartedAt > MAX_STARTUP_WAIT_MS) {
+      if (elapsed > MAX_STARTUP_WAIT_MS) {
         console.warn("[StartupReadinessGate] Critical assets timed out, enforcing fallback.");
         state.markFallbackTriggered();
       }
@@ -34,7 +86,7 @@ export function StartupReadinessGate() {
     stableFrames.current += 1;
     if (stableFrames.current >= STABLE_FRAME_THRESHOLD) {
       state.markStableFrameReady();
-    } else if (Date.now() - state.startupStartedAt > MAX_STARTUP_WAIT_MS + 2000) {
+    } else if (elapsed > MAX_STARTUP_WAIT_MS + 2000) {
       console.warn("[StartupReadinessGate] Stable frames timed out, enforcing fallback.");
       state.markFallbackTriggered();
     }

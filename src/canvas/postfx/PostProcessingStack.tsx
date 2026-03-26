@@ -5,6 +5,7 @@ import { BlendFunction } from "postprocessing";
 import { useThree } from "@react-three/fiber";
 import { useCapsStore } from "@/stores/capsStore";
 import { useScrollStore } from "@/stores/scrollStore";
+import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { WORLD_PHASES } from "../viewportProfiles";
 
 function nextPhaseIndex(index: number) {
@@ -18,8 +19,11 @@ export function PostProcessingStack() {
   // Guard against renderer not yet initialized — prevents 'Cannot read properties of null
   // (reading alpha)' crash in EffectComposer.addPass under React 19 concurrent rendering.
   const gl = useThree((state) => state.gl);
+  // Defer EffectComposer mount until scene startup is confirmed stable. Mounting alongside
+  // Suspense-driven GLTF loading causes concurrent-render null-ref in addPass (React 19 + r3f v9).
+  const stableFrameReady = useSceneLoadStore((state) => state.stableFrameReady);
 
-  if (!gl || !caps || !caps.enablePostProcessing) {
+  if (!gl || !stableFrameReady || !caps || !caps.enablePostProcessing) {
     return null;
   }
 
@@ -40,9 +44,15 @@ export function PostProcessingStack() {
     currentProfile.postFxProfile.vignetteDarkness *
     (tierOverride?.vignetteDarknessMultiplier ?? 1);
 
+  const chromaticBase = currentProfile.postFxProfile.chromaticOffset;
+  const nextChromaticBase = nextProfile.postFxProfile.chromaticOffset;
+  const chromaticLerped =
+    chromaticBase + (nextChromaticBase - chromaticBase) * actProgress;
+  const chromaticScaled =
+    chromaticLerped * (tierOverride?.chromaticOffsetMultiplier ?? 1);
   const chromaticOffset: [number, number] =
-    caps.tier === "high" && (activeAct === 1 || activeAct === 3)
-      ? [0.002, 0.001]
+    caps.tier !== "low"
+      ? [chromaticScaled, chromaticScaled * 0.5]
       : [0, 0];
 
   return (

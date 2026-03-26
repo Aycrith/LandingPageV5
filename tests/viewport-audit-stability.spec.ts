@@ -60,6 +60,11 @@ test.describe("viewport audit stability", () => {
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.triangles ?? 0).toBeGreaterThan(0);
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.geometries ?? 0).toBeGreaterThan(0);
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.textures ?? 0).toBeGreaterThan(0);
+    // Hard budget assertions — must stay under triangle/draw-call limits
+    expect(idleSnapshot?.metrics.renderPipeline?.renderer.triangles ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(280000);
+    expect(idleSnapshot?.metrics.renderPipeline?.renderer.calls ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(80);
 
     const idleHeap = await sampleHeap(page);
     if (initialHeap != null && idleHeap != null) {
@@ -97,6 +102,32 @@ test.describe("viewport audit stability", () => {
     }
 
     expect(unexpectedWarnings(warnings)).toEqual([]);
+  });
+
+  test("6-act scroll sweep survives with context intact and budgets in range", async ({
+    page,
+  }) => {
+    await waitForExperienceReady(page, "?audit=1&forceTier=high");
+
+    // Sweep all 6 acts at representative progress points
+    const actProgressPoints = [0.04, 0.21, 0.38, 0.54, 0.71, 0.88, 0.96];
+    for (const progress of actProgressPoints) {
+      await setAuditProgress(page, progress);
+      await page.waitForTimeout(400);
+      const snapshot = await sampleCanvas(page);
+      expect(snapshot?.isContextLost).toBeFalsy();
+      if (snapshot?.metrics.renderPipeline) {
+        expect(snapshot.metrics.renderPipeline.renderer.triangles)
+          .toBeLessThanOrEqual(280000);
+        expect(snapshot.metrics.renderPipeline.renderer.calls)
+          .toBeLessThanOrEqual(80);
+      }
+    }
+
+    // Confirm context still alive after full sweep
+    const finalSnapshot = await sampleCanvas(page);
+    expect(finalSnapshot?.isContextLost).toBeFalsy();
+    expect(finalSnapshot?.metrics.renderPipeline).toBeTruthy();
   });
 
   test("enters safe mode when explicitly requested", async ({

@@ -6,11 +6,12 @@ import * as THREE from "three";
 import { useScrollStore } from "@/stores/scrollStore";
 
 const ACT_SKY_COLORS = [
-  { top: "#020208", bottom: "#050510", mid: "#0a0a1a" },
-  { top: "#030510", bottom: "#060812", mid: "#0a1020" },
-  { top: "#08040e", bottom: "#0a0610", mid: "#120a1a" },
-  { top: "#0d0805", bottom: "#100a06", mid: "#1a1208" },
-  { top: "#080308", bottom: "#0a050a", mid: "#150810" },
+  { top: "#020208", bottom: "#050510", mid: "#0a0a1a" },  // Act 1 Seed
+  { top: "#030510", bottom: "#060812", mid: "#0a1020" },  // Act 2 Scaffold
+  { top: "#08040e", bottom: "#0a0610", mid: "#120a1a" },  // Act 3 Circulation
+  { top: "#0d0805", bottom: "#100a06", mid: "#1a1208" },  // Act 4 Sentience
+  { top: "#080308", bottom: "#0a050a", mid: "#150810" },  // Act 5 Apotheosis
+  { top: "#000000", bottom: "#000008", mid: "#00000f" },  // Act 6 Quantum Consciousness
 ];
 
 export function SkyBox() {

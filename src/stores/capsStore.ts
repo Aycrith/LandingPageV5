@@ -48,8 +48,8 @@ const QUALITY_PROFILES: Record<
     dpr: [1, 1.15],
     budgets: {
       fps: 60,
-      drawCalls: 150,
-      triangles: 900000,
+      drawCalls: 80,
+      triangles: 280000,
       geometries: 180,
       textures: 48,
       programs: 18,
@@ -66,8 +66,8 @@ const QUALITY_PROFILES: Record<
     dpr: [0.9, 1],
     budgets: {
       fps: 60,
-      drawCalls: 100,
-      triangles: 450000,
+      drawCalls: 55,
+      triangles: 180000,
       geometries: 120,
       textures: 30,
       programs: 14,
@@ -84,8 +84,8 @@ const QUALITY_PROFILES: Record<
     dpr: [0.75, 0.9],
     budgets: {
       fps: 30,
-      drawCalls: 50,
-      triangles: 180000,
+      drawCalls: 30,
+      triangles: 80000,
       geometries: 72,
       textures: 18,
       programs: 10,
@@ -182,7 +182,13 @@ export function detectCapabilities(): RuntimeCaps {
   if (process.env.NODE_ENV !== "production") {
     if (forcedTier) {
       releaseProbeContext(gl);
-      return buildCaps(forcedTier, meta);
+      const caps = buildCaps(forcedTier, meta);
+      // In dev mode, Turbopack JIT-compiles and serves assets on demand, so
+      // model loading is significantly slower than in a production build.
+      // Override the startup budget to a generous value so the StartupReadiness-
+      // Gate doesn't trigger safe-mode fallback before assets finish loading.
+      caps.budgets = { ...caps.budgets, loadTimeMs: 30_000 };
+      return caps;
     }
     releaseProbeContext(gl);
     return buildCaps("low", meta);

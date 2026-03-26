@@ -10,14 +10,22 @@ import vertexShader from "@/canvas/shaders/particles.vert.glsl";
 import fragmentShader from "@/canvas/shaders/particles.frag.glsl";
 import { seededUnit } from "@/lib/random";
 import { useSharedTexture } from "@/lib/textures";
+import { WORLD_PHASES } from "@/canvas/viewportProfiles";
 import type { AmbientParticleMode } from "@/canvas/viewportProfiles";
+import {
+  ForceRegistry,
+  createForceSample,
+  type ForceSample,
+} from "@/canvas/forces/ForceRegistry";
+import { InteractionForce } from "@/canvas/forces/InteractionForce";
 
 const ACT_ACCENT_COLORS = [
-  new THREE.Color("#7ef2c6"),
-  new THREE.Color("#6dc7ff"),
-  new THREE.Color("#d0a2ff"),
-  new THREE.Color("#ffd06f"),
-  new THREE.Color("#ff7eb3"),
+  new THREE.Color("#8af4dd"),  // Act 1 Seed: cyan-teal
+  new THREE.Color("#8cc9ff"),  // Act 2 Scaffold: ice blue
+  new THREE.Color("#83f3f0"),  // Act 3 Circulation: cyan-green
+  new THREE.Color("#c8a8ff"),  // Act 4 Sentience: lavender-purple
+  new THREE.Color("#ffd2f0"),  // Act 5 Apotheosis: blush pink
+  new THREE.Color("#00ffee"),  // Act 6 Quantum Consciousness: electric cyan
 ];
 
 interface ParticleFieldProps {
@@ -78,6 +86,9 @@ export function ParticleField({ mode }: ParticleFieldProps) {
           return t;
         })(),
       },
+      uGravityPos: { value: new THREE.Vector3(0, 0, 0) },
+      uGravityStrength: { value: 0 },
+      uVortexStrength: { value: 0 },
     }),
     []
   );
@@ -97,6 +108,14 @@ export function ParticleField({ mode }: ParticleFieldProps) {
   }, [noiseTexture]);
 
   const blendedColor = useMemo(() => new THREE.Color(), []);
+
+  const forceRegistry = useMemo(() => new ForceRegistry(), []);
+  const interactionForce = useMemo(() => new InteractionForce(), []);
+  const forceSampleRef = useRef<ForceSample>(createForceSample());
+
+  useEffect(() => {
+    return forceRegistry.register(interactionForce);
+  }, [forceRegistry, interactionForce]);
 
   useFrame((state) => {
     if (!materialRef.current) return;
@@ -120,6 +139,38 @@ export function ParticleField({ mode }: ParticleFieldProps) {
       mode === "dense" ? 0.72 : 0.34;
     materialRef.current.uniforms.uSizeScale.value =
       mode === "dense" ? 1.05 : 0.82;
+
+    // ForceRegistry gravity well — per-act strength from motionRig.pointerInfluence
+    const pointerInfluence = WORLD_PHASES[activeAct]?.motionRig?.pointerInfluence ?? 0.1;
+    const forceSample = forceRegistry.evaluate(
+      {
+        dt: 0.016,
+        scrollVelocity: velocity,
+        pointerX: mouse.current.x,
+        pointerY: mouse.current.y,
+        tiltX: mouse.current.tiltX,
+        tiltY: mouse.current.tiltY,
+      },
+      forceSampleRef.current
+    );
+    materialRef.current.uniforms.uGravityPos.value.copy(forceSample.gravityWellPos);
+    materialRef.current.uniforms.uGravityStrength.value =
+      forceSample.gravityWellStrength * pointerInfluence * 10;
+
+    // Inward vortex pull — lerps to peak at Act 5 (Apotheosis)
+    const vortexStrength =
+      activeAct === 4 ? actProgress * 0.8
+      : activeAct > 4 ? 0.8
+      : 0;
+    materialRef.current.uniforms.uVortexStrength.value = vortexStrength;
+
+    // Per-act particle count via draw range — avoids geometry rebuilds
+    if (meshRef.current && caps) {
+      const profile = WORLD_PHASES[activeAct];
+      const tierOverride = profile?.tierOverrides?.[caps.tier];
+      const activeCount = tierOverride?.particleCount ?? count;
+      meshRef.current.geometry.setDrawRange(0, Math.min(activeCount, count));
+    }
   });
 
   return (

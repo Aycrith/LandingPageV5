@@ -71,6 +71,20 @@ function UiBlock({
       ]}
       scale={0.34 + emphasis * 0.03}
     >
+      {profile.textSafeZone.panel === "glass" && (
+        <mesh position={[0, 0.12, -0.02]}>
+          <planeGeometry args={[profile.uiRig.maxWidth + 0.4, 2.8]} />
+          <meshPhysicalMaterial
+            transmission={0.8}
+            roughness={0.0}
+            transparent
+            opacity={profile.textSafeZone.veilOpacity * opacity}
+            depthWrite={false}
+            color="#001122"
+          />
+        </mesh>
+      )}
+
       <mesh position={railLocal}>
         <boxGeometry args={[0.04, 2.15, 0.04]} />
         <meshBasicMaterial

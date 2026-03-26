@@ -9,6 +9,7 @@ import { CameraRig } from "./camera/CameraRig";
 import { PostProcessingStack } from "./postfx/PostProcessingStack";
 import { StartupReadinessGate } from "./StartupReadinessGate";
 import { ViewportAuditProbe } from "./ViewportAuditProbe";
+import { PostFxErrorBoundary } from "./CanvasErrorBoundary";
 import { ACT_VIEWPORT_PROFILES } from "./viewportProfiles";
 import {
   useCapsStore,
@@ -93,7 +94,7 @@ export default function Experience() {
           near: 0.1,
           far: 200,
         }}
-        style={{ background: "#050507" }}
+        style={{ background: "#020405" }}
         onCreated={(state) => {
           if (state.gl.getContext().isContextLost()) {
             useSceneLoadStore.getState().markFallbackTriggered();
@@ -106,7 +107,9 @@ export default function Experience() {
         {!hasFallbackTriggered && (
           <>
             <SceneManager />
-            <PostProcessingStack />
+            <PostFxErrorBoundary>
+              <PostProcessingStack />
+            </PostFxErrorBoundary>
           </>
         )}
         {debugMode && (

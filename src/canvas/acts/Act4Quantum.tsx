@@ -48,6 +48,11 @@ function QuantumModel({ progress }: { progress: number }) {
     groupRef.current.rotation.y = t * 0.1;
     const appear = Math.min(progress / 0.3, 1);
     groupRef.current.scale.setScalar(Math.min(appear * 0.035, fittedMaxScale));
+    groupRef.current.position.set(
+      ACT_PROFILE.heroRig.splitDistance * 0.5,
+      Math.sin(t * 0.4) * 0.3,
+      0
+    );
   });
 
   return (
@@ -89,8 +94,11 @@ function ParadoxModel({ progress }: { progress: number }) {
       Math.min(appear, 1) * ACT_PROFILE.heroModelBehavior.maxScale;
     const appliedScale = Math.min(desiredScale, fittedMaxScale);
     groupRef.current.scale.setScalar(appliedScale);
-    groupRef.current.position.x = Math.sin(t * 0.2) * 2 - 3;
-    groupRef.current.position.y = Math.cos(t * 0.15) * 1.5;
+    groupRef.current.position.set(
+      -ACT_PROFILE.heroRig.splitDistance * 0.5,
+      Math.sin(t * 0.4 + Math.PI) * 0.3,
+      0
+    );
 
     groupRef.current.getWorldPosition(worldPosRef.current);
     const distance = worldPosRef.current.distanceTo(camera.position);
@@ -105,14 +113,7 @@ function ParadoxModel({ progress }: { progress: number }) {
   });
 
   return (
-    <group
-      ref={groupRef}
-      position={[
-        -3 + ACT_PROFILE.heroModelBehavior.focusOffset[0],
-        ACT_PROFILE.heroModelBehavior.focusOffset[1],
-        ACT_PROFILE.heroModelBehavior.focusOffset[2],
-      ]}
-    >
+    <group ref={groupRef}>
       <primitive object={sceneClone} />
     </group>
   );
@@ -123,6 +124,8 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   const attractor1Ref = useRef<THREE.Mesh>(null);
   const attractor2Ref = useRef<THREE.Mesh>(null);
   const orbitalsRef = useRef<THREE.InstancedMesh>(null);
+  const quantumModelGroupRef = useRef<THREE.Group>(null);
+  const paradoxModelGroupRef = useRef<THREE.Group>(null);
 
   const orbitalCount = 64;
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -202,6 +205,14 @@ export function Act4Quantum({ progress, visible }: ActProps) {
       orbitalsRef.current.instanceMatrix.needsUpdate = true;
     }
 
+    // LOD switch: only one hero model active at a time to halve triangle budget
+    if (quantumModelGroupRef.current) {
+      quantumModelGroupRef.current.visible = progress < 0.65;
+    }
+    if (paradoxModelGroupRef.current) {
+      paradoxModelGroupRef.current.visible = progress > 0.35;
+    }
+
     groupRef.current.visible = progress > 0.01;
   });
 
@@ -269,8 +280,12 @@ export function Act4Quantum({ progress, visible }: ActProps) {
       <Ground103Floor progress={progress} />
 
       <Suspense fallback={null}>
-        <QuantumModel progress={progress} />
-        <ParadoxModel progress={progress} />
+        <group ref={quantumModelGroupRef}>
+          <QuantumModel progress={progress} />
+        </group>
+        <group ref={paradoxModelGroupRef}>
+          <ParadoxModel progress={progress} />
+        </group>
       </Suspense>
 
       <pointLight

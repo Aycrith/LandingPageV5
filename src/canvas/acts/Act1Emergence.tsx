@@ -4,7 +4,6 @@ import { useRef, useMemo, Suspense, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { CrystalMaterial } from "@/canvas/materials/CrystalMaterial";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
 import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
@@ -96,6 +95,7 @@ function DarkStarModel({ progress }: { progress: number }) {
 export function Act1Emergence({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
   const coreRef = useRef<THREE.Mesh>(null);
+  const coreMaterialRef = useRef<THREE.MeshPhysicalMaterial>(null);
   const glowRef = useRef<THREE.Mesh>(null);
   const glowMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
   const accretionPrimaryRef = useRef<THREE.Mesh>(null);
@@ -120,6 +120,11 @@ export function Act1Emergence({ progress, visible }: ActProps) {
       coreRef.current.scale.setScalar(scale * (1 + breath));
       coreRef.current.rotation.y = t * 0.12;
       coreRef.current.rotation.x = Math.sin(t * 0.18) * 0.08;
+    }
+    if (coreMaterialRef.current) {
+      coreMaterialRef.current.emissiveIntensity =
+        0.62 * ACT_PROFILE.materialGrade.emissiveBoost +
+        Math.sin(t * 1.5) * 0.08;
     }
 
     if (glowRef.current) {
@@ -176,10 +181,18 @@ export function Act1Emergence({ progress, visible }: ActProps) {
     <group ref={groupRef}>
       <mesh ref={coreRef}>
         <icosahedronGeometry args={[1, 4]} />
-        <CrystalMaterial
-          color="#7ef2c6"
-          fresnelPower={2.5}
-          iridescenceStrength={0.7}
+        <meshPhysicalMaterial
+          ref={coreMaterialRef}
+          color={ACT_PROFILE.materialGrade.coreColor}
+          emissive={ACT_PROFILE.materialGrade.coreEmissive}
+          emissiveIntensity={0.62}
+          roughness={0.16}
+          metalness={0.82}
+          transmission={0.08}
+          thickness={0.22}
+          clearcoat={1}
+          clearcoatRoughness={0.08}
+          toneMapped={false}
         />
       </mesh>
 

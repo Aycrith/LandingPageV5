@@ -49,7 +49,8 @@ export type OverlayMode =
   | "scaffold"
   | "circulation"
   | "sentience"
-  | "apotheosis";
+  | "apotheosis"
+  | "quantum";
 
 export type AmbientParticleMode = "dense" | "sparse" | "none";
 
@@ -126,6 +127,7 @@ export interface TierPresentationOverride {
   bloomThresholdOffset?: number;
   vignetteDarknessMultiplier?: number;
   chromaticOffsetMultiplier?: number;
+  particleCount?: number;
 }
 
 export interface MaterialGradeProfile {
@@ -248,7 +250,6 @@ export interface WorldPhaseProfile {
   heroModelBehavior: HeroModelBehavior;
   fxLayerBehavior: FxLayerBehavior;
   textSafeZone: TextSafeZone;
-  lightRig: LightRig;
   postFxProfile: PostFxProfile;
   overlayMode: OverlayMode;
   ambientParticleMode: AmbientParticleMode;
@@ -290,25 +291,30 @@ function createMaterialGrade(
   };
 }
 
-function createTierOverrides(): Partial<Record<PresentationTier, TierPresentationOverride>> {
+function createTierOverrides(
+  particleCounts?: { high: number; medium: number; low: number }
+): Partial<Record<PresentationTier, TierPresentationOverride>> {
   return {
     high: {
       renderRange: 1,
       ambientParticleMode: "sparse",
       bloomIntensityMultiplier: 1,
       chromaticOffsetMultiplier: 0,
+      particleCount: particleCounts?.high,
     },
     medium: {
       renderRange: 0,
       ambientParticleMode: "sparse",
       bloomIntensityMultiplier: 0.84,
       chromaticOffsetMultiplier: 0,
+      particleCount: particleCounts?.medium,
     },
     low: {
       renderRange: 0,
       ambientParticleMode: "none",
       bloomIntensityMultiplier: 0.52,
       chromaticOffsetMultiplier: 0,
+      particleCount: particleCounts?.low,
     },
   };
 }
@@ -454,33 +460,6 @@ const BASE_WORLD_PHASES = [
       veilOpacity: 0,
       titleScale: "display",
     },
-    lightRig: {
-      exposure: 0.92,
-      fogColor: "#020405",
-      fogDensity: 0.028,
-      ambientIntensity: 0.1,
-      key: {
-        color: "#8af4dd",
-        intensity: 3.2,
-        position: [3.4, 4.8, 5.5],
-      },
-      fill: {
-        color: "#d8fffb",
-        intensity: 0.55,
-        position: [-4.2, 1.4, 3.8],
-      },
-      rim: {
-        color: "#8af4dd",
-        intensity: 2.1,
-        position: [0, 4.2, -6.8],
-        angle: Math.PI / 6,
-      },
-      practical: {
-        color: "#b2fff1",
-        intensity: 5.6,
-        position: [0, 0.3, -0.5],
-      },
-    },
     postFxProfile: {
       bloomThreshold: 0.9,
       bloomSmoothing: 0.035,
@@ -491,7 +470,7 @@ const BASE_WORLD_PHASES = [
     },
     overlayMode: "seed",
     ambientParticleMode: "sparse",
-    tierOverrides: createTierOverrides(),
+    tierOverrides: createTierOverrides({ high: 8000, medium: 3000, low: 1000 }),
   },
   {
     id: 1,
@@ -534,7 +513,7 @@ const BASE_WORLD_PHASES = [
       height: 6.6,
     },
     cameraRailSegment: {
-      position: [0.82, 0.34, 5.45],
+      position: [0.22, 0.14, 5.45],
       lookAt: [0.28, 0.02, -0.3],
       fov: 29,
     },
@@ -630,44 +609,17 @@ const BASE_WORLD_PHASES = [
       veilOpacity: 0,
       titleScale: "feature",
     },
-    lightRig: {
-      exposure: 0.98,
-      fogColor: "#04070d",
-      fogDensity: 0.022,
-      ambientIntensity: 0.12,
-      key: {
-        color: "#8cc9ff",
-        intensity: 3.5,
-        position: [4.6, 4.4, 5.1],
-      },
-      fill: {
-        color: "#eff7ff",
-        intensity: 0.7,
-        position: [-3.8, 1.2, 4.5],
-      },
-      rim: {
-        color: "#9bddff",
-        intensity: 2.4,
-        position: [-1.4, 5.3, -6.4],
-        angle: Math.PI / 5.4,
-      },
-      practical: {
-        color: "#9fd6ff",
-        intensity: 6.6,
-        position: [0.6, 0.2, -0.6],
-      },
-    },
     postFxProfile: {
       bloomThreshold: 0.92,
       bloomSmoothing: 0.03,
       bloomIntensity: 0.36,
       vignetteOffset: 0.22,
       vignetteDarkness: 0.68,
-      chromaticOffset: 0,
+      chromaticOffset: 0.0018,
     },
     overlayMode: "scaffold",
     ambientParticleMode: "sparse",
-    tierOverrides: createTierOverrides(),
+    tierOverrides: createTierOverrides({ high: 5000, medium: 2000, low: 800 }),
   },
   {
     id: 2,
@@ -710,7 +662,7 @@ const BASE_WORLD_PHASES = [
       height: 6.8,
     },
     cameraRailSegment: {
-      position: [0.18, 0.18, 5.8],
+      position: [-0.12, 0.18, 5.4],
       lookAt: [0.28, 0, -1.05],
       fov: 28,
     },
@@ -807,33 +759,6 @@ const BASE_WORLD_PHASES = [
       veilOpacity: 0,
       titleScale: "feature",
     },
-    lightRig: {
-      exposure: 0.96,
-      fogColor: "#020609",
-      fogDensity: 0.02,
-      ambientIntensity: 0.1,
-      key: {
-        color: "#83f3f0",
-        intensity: 3.2,
-        position: [3.8, 4.1, 5.8],
-      },
-      fill: {
-        color: "#e4fffb",
-        intensity: 0.62,
-        position: [-3.2, 0.8, 5.2],
-      },
-      rim: {
-        color: "#7af0da",
-        intensity: 2.1,
-        position: [0, 4.8, -7.6],
-        angle: Math.PI / 5.2,
-      },
-      practical: {
-        color: "#9efdfa",
-        intensity: 5.8,
-        position: [0.2, 0.1, -1.2],
-      },
-    },
     postFxProfile: {
       bloomThreshold: 0.93,
       bloomSmoothing: 0.03,
@@ -844,7 +769,7 @@ const BASE_WORLD_PHASES = [
     },
     overlayMode: "circulation",
     ambientParticleMode: "sparse",
-    tierOverrides: createTierOverrides(),
+    tierOverrides: createTierOverrides({ high: 12000, medium: 5000, low: 1500 }),
   },
   {
     id: 3,
@@ -887,7 +812,7 @@ const BASE_WORLD_PHASES = [
       height: 7,
     },
     cameraRailSegment: {
-      position: [-0.32, 0.28, 5.4],
+      position: [-0.08, 0.28, 5.6],
       lookAt: [0, 0.05, -0.58],
       fov: 29,
     },
@@ -983,44 +908,17 @@ const BASE_WORLD_PHASES = [
       veilOpacity: 0,
       titleScale: "feature",
     },
-    lightRig: {
-      exposure: 1,
-      fogColor: "#07050c",
-      fogDensity: 0.024,
-      ambientIntensity: 0.11,
-      key: {
-        color: "#c8a8ff",
-        intensity: 3.4,
-        position: [4.2, 4.6, 4.4],
-      },
-      fill: {
-        color: "#ffd898",
-        intensity: 0.65,
-        position: [-3.6, 1.1, 4.8],
-      },
-      rim: {
-        color: "#f6c86a",
-        intensity: 2.2,
-        position: [0, 4.8, -7.1],
-        angle: Math.PI / 5.6,
-      },
-      practical: {
-        color: "#cfb2ff",
-        intensity: 6.2,
-        position: [0, 0.4, -0.9],
-      },
-    },
     postFxProfile: {
       bloomThreshold: 0.93,
       bloomSmoothing: 0.03,
       bloomIntensity: 0.38,
       vignetteOffset: 0.22,
       vignetteDarkness: 0.66,
-      chromaticOffset: 0,
+      chromaticOffset: 0.0018,
     },
     overlayMode: "sentience",
     ambientParticleMode: "sparse",
-    tierOverrides: createTierOverrides(),
+    tierOverrides: createTierOverrides({ high: 10000, medium: 4000, low: 1200 }),
   },
   {
     id: 4,
@@ -1065,7 +963,7 @@ const BASE_WORLD_PHASES = [
       height: 7.2,
     },
     cameraRailSegment: {
-      position: [-0.08, 0.34, 5.2],
+      position: [0.04, 0.20, 5.2],
       lookAt: [0, 0.08, -0.38],
       fov: 29,
     },
@@ -1161,33 +1059,6 @@ const BASE_WORLD_PHASES = [
       veilOpacity: 0,
       titleScale: "feature",
     },
-    lightRig: {
-      exposure: 1.02,
-      fogColor: "#08050a",
-      fogDensity: 0.026,
-      ambientIntensity: 0.1,
-      key: {
-        color: "#ffd2f0",
-        intensity: 3.7,
-        position: [3.2, 4.5, 5.6],
-      },
-      fill: {
-        color: "#fff6fb",
-        intensity: 0.72,
-        position: [-3.8, 1.2, 4.4],
-      },
-      rim: {
-        color: "#f7a4d6",
-        intensity: 2.4,
-        position: [0, 5.1, -7.2],
-        angle: Math.PI / 5.4,
-      },
-      practical: {
-        color: "#ffdff4",
-        intensity: 7.2,
-        position: [0, 0.55, -0.75],
-      },
-    },
     postFxProfile: {
       bloomThreshold: 0.92,
       bloomSmoothing: 0.028,
@@ -1198,7 +1069,7 @@ const BASE_WORLD_PHASES = [
     },
     overlayMode: "apotheosis",
     ambientParticleMode: "sparse",
-    tierOverrides: createTierOverrides(),
+    tierOverrides: createTierOverrides({ high: 15000, medium: 6000, low: 2000 }),
   },
   {
     id: 5,
@@ -1214,36 +1085,36 @@ const BASE_WORLD_PHASES = [
     previewCamera: {
       position: [0, 0, 8],
       lookAt: [0, 0, 0],
-      fov: 75,
+      fov: 32,
     },
     settleCamera: {
-      position: [0, 0, 6],
+      position: [0.12, 0.22, 4.8],
       lookAt: [0, 0, -2],
-      fov: 70,
+      fov: 28,
     },
     cameraPath: {
       positions: [
         [0, 0, 8],
-        [0.5, 0.3, 5],
-        [0, 0, 2],
+        [0.08, 0.14, 5.8],
+        [0.12, 0.22, 4.8],
       ],
       lookAts: [
         [0, 0, 0],
+        [0, 0, -1],
         [0, 0, -2],
-        [0, 0, -8],
       ],
-      fovs: [75, 72, 70],
+      fovs: [32, 30, 28],
     },
     worldAnchor: [0, 0, -2],
     stageVolume: {
       radius: 6,
-      depth: 24,
-      height: 12,
+      depth: 15,
+      height: 8,
     },
     cameraRailSegment: {
-      position: [0, 0, -12],
-      lookAt: [0, 0, -18],
-      fov: 75,
+      position: [0.12, 0.22, 4.8],
+      lookAt: [0, 0, -2],
+      fov: 28,
     },
     heroRig: {
       rawHeight: 4.0,
@@ -1269,13 +1140,13 @@ const BASE_WORLD_PHASES = [
       fogDensity: 0.08,
       ambientIntensity: 0.02,
       key: {
-        color: "#3300aa",
+        color: "#1a00cc",
         intensity: 4,
         position: [-3, 4, 2],
       },
       fill: {
         color: "#00ccff",
-        intensity: 2,
+        intensity: 0.62,
         position: [4, -2, -4],
       },
       rim: {
@@ -1285,8 +1156,8 @@ const BASE_WORLD_PHASES = [
         angle: Math.PI / 5,
       },
       practical: {
-        color: "#ff6600",
-        intensity: 3,
+        color: "#00ffee",
+        intensity: 5.8,
         position: [0, 0, 0],
       },
     },
@@ -1337,42 +1208,15 @@ const BASE_WORLD_PHASES = [
       veilOpacity: 0.18,
       titleScale: "display",
     },
-    lightRig: {
-      exposure: 0.72,
-      fogColor: "#000000",
-      fogDensity: 0.08,
-      ambientIntensity: 0.02,
-      key: {
-        color: "#3300aa",
-        intensity: 4,
-        position: [-3, 4, 2],
-      },
-      fill: {
-        color: "#00ccff",
-        intensity: 2,
-        position: [4, -2, -4],
-      },
-      rim: {
-        color: "#00ffee",
-        intensity: 1.8,
-        position: [0, 6, -10],
-        angle: Math.PI / 5,
-      },
-      practical: {
-        color: "#ff6600",
-        intensity: 3,
-        position: [0, 0, 0],
-      },
-    },
     postFxProfile: {
-      bloomThreshold: 0.05,
+      bloomThreshold: 0.72,
       bloomSmoothing: 0.025,
-      bloomIntensity: 3.2,
+      bloomIntensity: 1.8,
       vignetteOffset: 0.18,
       vignetteDarkness: 0.95,
       chromaticOffset: 0,
     },
-    overlayMode: "apotheosis",
+    overlayMode: "quantum",
     ambientParticleMode: "dense",
     tierOverrides: {
       high: {
@@ -1380,18 +1224,21 @@ const BASE_WORLD_PHASES = [
         ambientParticleMode: "dense",
         bloomIntensityMultiplier: 1,
         chromaticOffsetMultiplier: 0,
+        particleCount: 20000,
       },
       medium: {
         renderRange: 0,
         ambientParticleMode: "sparse",
         bloomIntensityMultiplier: 0.75,
         chromaticOffsetMultiplier: 0,
+        particleCount: 8000,
       },
       low: {
         renderRange: 0,
         ambientParticleMode: "none",
         bloomIntensityMultiplier: 0.4,
         chromaticOffsetMultiplier: 0,
+        particleCount: 2500,
       },
     },
   },

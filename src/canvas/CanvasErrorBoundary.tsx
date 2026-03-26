@@ -48,3 +48,31 @@ export class CanvasErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+/**
+ * Lightweight boundary that wraps PostProcessingStack only.
+ * @react-three/postprocessing + React 19 concurrent rendering can throw
+ * EffectComposer.addPass(null) during reconciliation. Catching this here
+ * silently disables postprocessing without tearing down the canvas.
+ */
+export class PostFxErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false, errorMessage: null };
+  }
+
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, errorMessage: error?.message ?? "Unknown error" };
+  }
+
+  componentDidCatch(error: Error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[PostFxErrorBoundary] Postprocessing suppressed:", error.message);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}

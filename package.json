@@ -10,7 +10,12 @@
     "assets:normalize": "node scripts/convert-paradox-glb.mjs",
     "audit:viewport": "playwright test tests/viewport-audit-visual.spec.ts tests/viewport-audit-stability.spec.ts",
     "audit:viewport:visual": "playwright test tests/viewport-audit-visual.spec.ts",
-    "audit:viewport:stability": "playwright test tests/viewport-audit-stability.spec.ts"
+    "audit:viewport:stability": "playwright test tests/viewport-audit-stability.spec.ts",
+    "audit:renderer": "playwright test tests/renderer-snapshot.spec.ts",
+    "audit:snapshot": "playwright test --config=playwright.inspect.ts tests/renderer-snapshot.spec.ts",
+    "audit:extract": "node scripts/extract-page-state.mjs",
+    "audit:full": "playwright test tests/viewport-audit-visual.spec.ts tests/viewport-audit-stability.spec.ts tests/webgl-telemetry-audit.spec.ts tests/renderer-snapshot.spec.ts",
+    "browser:debug": "node scripts/launch-debug-browser.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
