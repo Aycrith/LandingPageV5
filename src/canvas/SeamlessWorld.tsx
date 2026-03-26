@@ -18,6 +18,7 @@ import { CuratedHeroLayer } from "./CuratedHeroLayer";
 import { VolumetricUI } from "./VolumetricUI";
 import { WORLD_PHASES } from "./viewportProfiles";
 import { VoidParticleField } from "./particles/VoidParticleField";
+import { computeActPresence, computeCrossfadeBlend } from "@/lib/transition";
 
 interface SeamlessWorldProps {
   activeAct: number;
@@ -86,16 +87,21 @@ export function SeamlessWorld({
       : 0;
 
   const weights = useMemo(() => {
-    const currentWeight =
-      1 - THREE.MathUtils.smootherstep(phaseBlend, 0.12, 0.78);
-    const nextWeight = THREE.MathUtils.smootherstep(phaseBlend, 0.56, 0.96);
+    const currentWeight = computeActPresence(
+      phaseBlend,
+      currentProfile.transitionRig
+    );
+    const crossfade = computeCrossfadeBlend(
+      phaseBlend,
+      currentProfile.transitionRig
+    );
     // Ensure the array always has at least 6 slots for Act 6 support
     const len = Math.max(WORLD_PHASES.length, 6);
     const list = Array.from({ length: len }, () => 0);
     list[activeAct] = currentWeight;
-    list[nextAct] = nextWeight;
+    list[nextAct] = crossfade;
     return list;
-  }, [activeAct, nextAct, phaseBlend]);
+  }, [activeAct, nextAct, phaseBlend, currentProfile.transitionRig]);
 
   // Sentience bridge: curved arc spanning the dual poles
   const sentienceBridgeCurve = useMemo(
@@ -147,23 +153,29 @@ export function SeamlessWorld({
   useEffect(() => { noiseTextureRef.current = noiseTexture; }, [noiseTexture]);
 
   const scaffoldRibs = useMemo(
-    () =>
-      [0.4, 2.12, 3.52].map((rotation) =>
-        new THREE.TubeGeometry(createScaffoldRib(2.55, rotation), 96, 0.032, 12)
-      ),
-    []
+    () => {
+      const segs = tier === "high" ? 96 : tier === "medium" ? 64 : 40;
+      const radial = tier === "high" ? 12 : tier === "medium" ? 8 : 6;
+      return [0.4, 2.12, 3.52].map((rotation) =>
+        new THREE.TubeGeometry(createScaffoldRib(2.55, rotation), segs, 0.032, radial)
+      );
+    },
+    [tier]
   );
   const circulationConduits = useMemo(
-    () =>
-      [-2, -1, 0, 1, 2].map((offset) =>
+    () => {
+      const segs = tier === "high" ? 132 : tier === "medium" ? 80 : 48;
+      const radial = tier === "high" ? 10 : tier === "medium" ? 8 : 6;
+      return [-2, -1, 0, 1, 2].map((offset) =>
         new THREE.TubeGeometry(
           createCirculationConduit(offset),
-          132,
+          segs,
           0.022,
-          10
+          radial
         )
-      ),
-    []
+      );
+    },
+    [tier]
   );
   const scaffoldNodes = useMemo(
     () =>
@@ -518,22 +530,24 @@ export function SeamlessWorld({
         <meshBasicMaterial color="#010305" side={THREE.BackSide} />
       </mesh>
 
-      <group ref={fogFarRef}>
-        <mesh position={[0, 0.4, 0]} scale={[12.4, 12.4, 1]}>
-          <planeGeometry args={[1, 1, 1, 1]} />
-          <meshBasicMaterial
-            ref={fogFarMaterialRef}
-            map={noiseTexture}
-            alphaMap={noiseTexture}
-            color="#081018"
-            transparent
-            opacity={0.14}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
+      {tier !== "low" && (
+        <group ref={fogFarRef}>
+          <mesh position={[0, 0.4, 0]} scale={[12.4, 12.4, 1]}>
+            <planeGeometry args={[1, 1, 1, 1]} />
+            <meshBasicMaterial
+              ref={fogFarMaterialRef}
+              map={noiseTexture}
+              alphaMap={noiseTexture}
+              color="#081018"
+              transparent
+              opacity={0.14}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
+      )}
 
       <group ref={fogNearRef}>
         <mesh position={[0, 0, 0]} scale={[8.8, 8.8, 1]}>
@@ -550,20 +564,22 @@ export function SeamlessWorld({
             toneMapped={false}
           />
         </mesh>
-        <mesh position={[-2.6, -1.1, 1.4]} scale={[5.6, 5.6, 1]}>
-          <planeGeometry args={[1, 1, 1, 1]} />
-          <meshBasicMaterial
-            ref={fogFrontMaterialRef}
-            map={noiseTexture}
-            alphaMap={noiseTexture}
-            color="#9deee6"
-            transparent
-            opacity={0.06}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            toneMapped={false}
-          />
-        </mesh>
+        {tier !== "low" && (
+          <mesh position={[-2.6, -1.1, 1.4]} scale={[5.6, 5.6, 1]}>
+            <planeGeometry args={[1, 1, 1, 1]} />
+            <meshBasicMaterial
+              ref={fogFrontMaterialRef}
+              map={noiseTexture}
+              alphaMap={noiseTexture}
+              color="#9deee6"
+              transparent
+              opacity={0.06}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              toneMapped={false}
+            />
+          </mesh>
+        )}
       </group>
 
       <points ref={sporesRef} geometry={sporeGeometry}>
@@ -619,11 +635,11 @@ export function SeamlessWorld({
               emissiveIntensity={0.1}
               transparent
               opacity={0.16}
-              transmission={0.92}
+              transmission={tier === "high" ? 0.92 : 0}
               thickness={1.2}
               metalness={0.04}
               roughness={0.06}
-              iridescence={0.44}
+              iridescence={tier !== "low" ? 0.44 : 0}
               iridescenceIOR={1.6}
               depthWrite={false}
             />
@@ -637,11 +653,11 @@ export function SeamlessWorld({
             emissiveIntensity={0.2}
             transparent
             opacity={0.32}
-            transmission={0.6}
+            transmission={tier === "high" ? 0.6 : 0}
             thickness={0.8}
             metalness={0.32}
             roughness={0.08}
-            iridescence={0.28}
+            iridescence={tier !== "low" ? 0.28 : 0}
             iridescenceIOR={1.4}
           />
         </instancedMesh>
@@ -656,7 +672,7 @@ export function SeamlessWorld({
               emissiveIntensity={0.24}
               transparent
               opacity={0.16}
-              transmission={0.3}
+              transmission={tier === "high" ? 0.3 : 0}
               thickness={0.2}
               metalness={0.24}
               roughness={0.2}
@@ -674,7 +690,7 @@ export function SeamlessWorld({
           emissiveIntensity={0.24}
           transparent
           opacity={0.24}
-          transmission={0.54}
+          transmission={tier === "high" ? 0.54 : 0}
           thickness={0.58}
           roughness={0.12}
           depthWrite={false}

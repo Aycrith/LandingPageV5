@@ -22,6 +22,7 @@ import {
   useSceneLoadStore,
 } from "@/stores/sceneLoadStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
+import { SceneDigest } from "./SceneDigest";
 
 const STARTUP_PROFILE = ACT_VIEWPORT_PROFILES[0];
 
@@ -103,6 +104,7 @@ export default function Experience() {
       >
         <StartupReadinessGate />
         <ViewportAuditProbe />
+        {process.env.NODE_ENV === "development" && <SceneDigest />}
         <CameraRig />
         {!hasFallbackTriggered && (
           <>

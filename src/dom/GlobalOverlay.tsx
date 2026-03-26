@@ -2,6 +2,8 @@
 
 import { useScrollStore } from "@/stores/scrollStore";
 import { useSceneLoadStore, isSceneStartupReady } from "@/stores/sceneLoadStore";
+import { WORLD_PHASES } from "@/canvas/viewportProfiles";
+import { computeActPresence, computeCrossfadeBlend } from "@/lib/transition";
 import { cn } from "@/lib/utils";
 import { LoadingScreen } from "./LoadingScreen";
 import { FloatingDock } from "./overlays/FloatingDock";
@@ -25,14 +27,29 @@ function FixedSection({
 }) {
   const activeAct = useScrollStore((s) => s.activeAct);
   const actProgress = useScrollStore((s) => s.actProgress);
-  const scrollIndex = activeAct + actProgress;
-  
-  // Crossfade between acts based on fractional scroll index
-  const distance = Math.abs(scrollIndex - actIndex);
-  const opacity = Math.max(0, 1 - distance * 1.5); 
-  
+
+  const profile = WORLD_PHASES[actIndex];
+  const isCurrentAct = activeAct === actIndex;
+  const isNextAct =
+    activeAct === (actIndex === 0 ? WORLD_PHASES.length - 1 : actIndex - 1);
+
+  let opacity = 0;
+  if (isCurrentAct) {
+    opacity = computeActPresence(actProgress, profile.transitionRig);
+  } else if (isNextAct) {
+    const prevIndex = actIndex === 0 ? WORLD_PHASES.length - 1 : actIndex - 1;
+    const prevProfile = WORLD_PHASES[prevIndex];
+    opacity = computeCrossfadeBlend(
+      actProgress,
+      prevProfile.transitionRig
+    );
+  }
+
+  // Subtle vertical shift and scale during transition for depth
+  const translateY = (1 - opacity) * 16;
+  const scale = 0.98 + opacity * 0.02;
   const isVisible = opacity > 0.01;
-  const isActive = opacity > 0.8; 
+  const isActive = opacity > 0.8;
 
   return (
     <div
@@ -43,7 +60,9 @@ function FixedSection({
       )}
       style={{
         opacity,
+        transform: `translateY(${translateY}px) scale(${scale})`,
         visibility: isVisible ? "visible" : "hidden",
+        willChange: isVisible ? "transform, opacity" : "auto",
       }}
     >
       <div 

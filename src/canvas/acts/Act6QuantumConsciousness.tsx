@@ -4,7 +4,7 @@ import { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { seededUnit, seededSigned } from "@/lib/random";
-import { useCapsStore } from "@/stores/capsStore";
+import { useActMaterialTierConfig } from "./materialTierConfig";
 
 interface ActProps {
   progress: number;
@@ -20,9 +20,8 @@ function MicrotubuleLattice({
   progress: number;
   visible: boolean;
 }) {
-  const caps = useCapsStore((s) => s.caps);
-  const tier = caps?.tier ?? "low";
-  const sphereCount = tier === "high" ? 1200 : tier === "medium" ? 600 : 200;
+  const tierConfig = useActMaterialTierConfig(5);
+  const sphereCount = tierConfig.mesh.latticeCount;
 
   const instancedRef = useRef<THREE.InstancedMesh>(null);
   const latticeMaterialRef = useRef<THREE.MeshPhysicalMaterial>(null);
@@ -189,9 +188,8 @@ function LatticeSpines({
 const DENDRITE_COUNT = 50;
 
 function NeuralFiringWeb({ progress }: { progress: number }) {
-  const caps = useCapsStore((s) => s.caps);
-  const tier = caps?.tier ?? "low";
-  const activeCount = tier === "high" ? 50 : tier === "medium" ? 25 : 10;
+  const tierConfig = useActMaterialTierConfig(5);
+  const activeCount = tierConfig.mesh.dendriteCount;
 
   const linesRef = useRef<THREE.Group>(null);
   const firePhase = useRef<Float32Array>(new Float32Array(DENDRITE_COUNT).fill(-1));
@@ -325,9 +323,8 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
 // ── Tubulin Particles ─────────────────────────────────────────────────────────
 
 function TubulinParticles({ progress, active }: { progress: number; active: boolean }) {
-  const caps = useCapsStore((s) => s.caps);
-  const tier = caps?.tier ?? "low";
-  const count = tier === "high" ? 80 : tier === "medium" ? 40 : 0;
+  const tierConfig = useActMaterialTierConfig(5);
+  const count = tierConfig.mesh.tubulinCount;
 
   const instancedRef = useRef<THREE.InstancedMesh>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);

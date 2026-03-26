@@ -83,9 +83,15 @@ declare module "@react-three/fiber" {
 
 interface HologramMaterialProps {
   color?: string;
+  scanlineCount?: number;
+  glitchIntensity?: number;
 }
 
-export function HologramMaterial({ color = "#6dc7ff" }: HologramMaterialProps) {
+export function HologramMaterial({
+  color = "#6dc7ff",
+  scanlineCount = 80,
+  glitchIntensity = 0.02,
+}: HologramMaterialProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
 
@@ -105,8 +111,8 @@ export function HologramMaterial({ color = "#6dc7ff" }: HologramMaterialProps) {
       uTime={0}
       uColor={new THREE.Color(color)}
       uScanlineSpeed={2.0}
-      uScanlineCount={80.0}
-      uGlitchIntensity={0.02}
+      uScanlineCount={scanlineCount}
+      uGlitchIntensity={glitchIntensity}
     />
   );
 }

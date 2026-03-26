@@ -10,6 +10,7 @@ import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { SeamlessWorld } from "./SeamlessWorld";
 import { WORLD_PHASES, type AmbientParticleMode, type WorldPhaseProfile } from "./viewportProfiles";
 import { tupleToVector3 } from "@/lib/scene";
+import { computeCrossfadeBlend } from "@/lib/transition";
 
 function resolveAmbientParticleMode(
   profile: WorldPhaseProfile,
@@ -73,6 +74,7 @@ export function SceneManager() {
   const vectorC = useMemo(() => new THREE.Vector3(), []);
   const vectorD = useMemo(() => new THREE.Vector3(), []);
   const vectorFocus = useMemo(() => new THREE.Vector3(), []);
+  const scratchColorA = useMemo(() => new THREE.Color(), []);
 
   useEffect(() => {
     if (keyLightRef.current && keyTargetRef.current) {
@@ -138,11 +140,14 @@ export function SceneManager() {
   ]);
 
   useFrame((state) => {
-    const blendT = actProgress;
+    const blendT = computeCrossfadeBlend(
+      actProgress,
+      currentProfile.transitionRig
+    );
 
     fogColor
       .set(currentProfile.lightingRig.fogColor)
-      .lerp(new THREE.Color(nextProfile.lightingRig.fogColor), blendT);
+      .lerp(scratchColorA.set(nextProfile.lightingRig.fogColor), blendT);
     if (fogRef.current) {
       fogRef.current.color.copy(fogColor);
       fogRef.current.density = THREE.MathUtils.lerp(
@@ -168,10 +173,10 @@ export function SceneManager() {
 
     hemiSkyColor
       .set(currentProfile.accent)
-      .lerp(new THREE.Color(nextProfile.accent), blendT);
+      .lerp(scratchColorA.set(nextProfile.accent), blendT);
     hemiGroundColor
       .set(currentProfile.lightingRig.fogColor)
-      .lerp(new THREE.Color(nextProfile.lightingRig.fogColor), blendT);
+      .lerp(scratchColorA.set(nextProfile.lightingRig.fogColor), blendT);
     if (hemisphereRef.current) {
       hemisphereRef.current.color.copy(hemiSkyColor);
       hemisphereRef.current.groundColor.copy(hemiGroundColor);
@@ -196,7 +201,7 @@ export function SceneManager() {
 
     keyColor
       .set(currentProfile.lightingRig.key.color)
-      .lerp(new THREE.Color(nextProfile.lightingRig.key.color), blendT);
+      .lerp(scratchColorA.set(nextProfile.lightingRig.key.color), blendT);
     if (keyLightRef.current) {
       keyLightRef.current.color.copy(keyColor);
       keyLightRef.current.intensity = THREE.MathUtils.lerp(
@@ -213,7 +218,7 @@ export function SceneManager() {
 
     fillColor
       .set(currentProfile.lightingRig.fill.color)
-      .lerp(new THREE.Color(nextProfile.lightingRig.fill.color), blendT);
+      .lerp(scratchColorA.set(nextProfile.lightingRig.fill.color), blendT);
     if (fillLightRef.current) {
       fillLightRef.current.color.copy(fillColor);
       fillLightRef.current.intensity = THREE.MathUtils.lerp(
@@ -230,7 +235,7 @@ export function SceneManager() {
 
     rimColor
       .set(currentProfile.lightingRig.rim.color)
-      .lerp(new THREE.Color(nextProfile.lightingRig.rim.color), blendT);
+      .lerp(scratchColorA.set(nextProfile.lightingRig.rim.color), blendT);
     if (rimLightRef.current) {
       rimLightRef.current.color.copy(rimColor);
       rimLightRef.current.intensity = THREE.MathUtils.lerp(
@@ -252,7 +257,7 @@ export function SceneManager() {
 
     practicalColor
       .set(currentProfile.lightingRig.practical.color)
-      .lerp(new THREE.Color(nextProfile.lightingRig.practical.color), blendT);
+      .lerp(scratchColorA.set(nextProfile.lightingRig.practical.color), blendT);
     if (practicalLightRef.current) {
       practicalLightRef.current.color.copy(practicalColor);
       practicalLightRef.current.intensity = THREE.MathUtils.lerp(

@@ -1,5 +1,22 @@
 {
-    "copilot-auto-continue.masterEnabled": false,
+    "copilot-auto-continue.masterEnabled": true,
     "copilot-auto-continue.smartAIEnabled": false,
-    "copilot-auto-continue.autoContinueEnabled": false
+    "copilot-auto-continue.autoContinueEnabled": true,
+    "copilot-auto-continue.autonomyLevel": 4,
+    "copilot-auto-continue.checkInterval": 5,
+    "copilot-auto-continue.responseCooldownMinutes": 10,
+    "copilot-auto-continue.stableTextDelay": 15,
+    "copilot-auto-continue.requireMultiMatch": 5,
+    "copilot-auto-continue.ocrEnabled": false,
+    "copilot-auto-continue.debugMode": true,
+    "copilot-auto-continue.soundNotifications": true,
+    "copilot-auto-continue.projectManager.enabled": false,
+    "copilot-auto-continue.projectManager.responseStyle": "detailed",
+    "copilot-auto-continue.projectManager.maxContextTokens": 11000,
+    "copilot-auto-continue.projectManager.showReasoning": true,
+    "copilot-auto-continue.projectManager.personality": "taskmaster",
+    "copilot-auto-continue.projectManager.autoStartDevMode": true,
+    "copilot-auto-continue.gitIntegrationEnabled": true,
+    "copilot-auto-continue.testAutomationEnabled": true,
+    "copilot-auto-continue.enabled": false
 }

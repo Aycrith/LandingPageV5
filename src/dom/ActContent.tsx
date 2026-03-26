@@ -6,7 +6,9 @@ import type {
   TextLayoutMode,
   TextPanelMode,
 } from "@/canvas/viewportProfiles";
+import { WORLD_PHASES } from "@/canvas/viewportProfiles";
 import { useScrollStore } from "@/stores/scrollStore";
+import { computeActPresence, computeCrossfadeBlend } from "@/lib/transition";
 import { cn } from "@/lib/utils";
 import { TextReveal } from "./TextReveal";
 import { MagneticButton } from "./MagneticButton";
@@ -70,12 +72,25 @@ export function ActContent({ profile }: ActContentProps) {
   const activeAct = useScrollStore((state) => state.activeAct);
   const actProgress = useScrollStore((state) => state.actProgress);
 
-  const scrollIndex = activeAct + actProgress;
-  const distance = Math.abs(scrollIndex - profile.id);
-  const opacity = Math.max(0, 1 - distance * 1.45);
-  const translateY = distance * 32;
+  const isCurrentAct = activeAct === profile.id;
+  const isNextAct =
+    activeAct === (profile.id === 0 ? WORLD_PHASES.length - 1 : profile.id - 1);
+
+  let opacity = 0;
+  if (isCurrentAct) {
+    opacity = computeActPresence(actProgress, profile.transitionRig);
+  } else if (isNextAct) {
+    const prevIndex = profile.id === 0 ? WORLD_PHASES.length - 1 : profile.id - 1;
+    const prevProfile = WORLD_PHASES[prevIndex];
+    opacity = computeCrossfadeBlend(
+      actProgress,
+      prevProfile.transitionRig
+    );
+  }
+
+  const translateY = (1 - opacity) * 32;
   const isVisible = opacity > 0.02;
-  const isActive = activeAct === profile.id;
+  const isActive = isCurrentAct && actProgress < profile.transitionRig.exit;
   const titleScaleClass =
     profile.textSafeZone.titleScale === "feature"
       ? "text-4xl md:text-6xl lg:text-7xl"

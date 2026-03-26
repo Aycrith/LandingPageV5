@@ -15,6 +15,7 @@ import {
 } from "@/lib/scene";
 import { WarpDriveBackground } from "@/canvas/environment/WarpDriveBackground";
 import { ShaderLinesField } from "@/canvas/environment/ShaderLinesField";
+import { useActMaterialTierConfig } from "./materialTierConfig";
 
 interface ActProps {
   progress: number;
@@ -94,7 +95,8 @@ export function Act5Convergence({ progress, visible }: ActProps) {
   const diskRef = useRef<THREE.Mesh>(null);
   const secondaryDiskRef = useRef<THREE.Mesh>(null);
 
-  const trailCount = 96;
+  const tierConfig = useActMaterialTierConfig(4);
+  const trailCount = tierConfig.mesh.trailCount;
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   const trailData = useMemo(() => {
@@ -106,7 +108,7 @@ export function Act5Convergence({ progress, visible }: ActProps) {
       scale: 0.012 + seededUnit(i * 19 + 4) * 0.03,
       spiralTightness: 0.4 + seededUnit(i * 19 + 5) * 1.2,
     }));
-  }, []);
+  }, [trailCount]);
 
   useEffect(() => {
     return () => {
@@ -200,11 +202,11 @@ export function Act5Convergence({ progress, visible }: ActProps) {
 
   return (
     <group ref={groupRef}>
-      <WarpDriveBackground progress={progress} />
-      <ShaderLinesField progress={progress} />
+      <WarpDriveBackground progress={progress} enabled={tierConfig.shader.enableWarpBackground} />
+      <ShaderLinesField progress={progress} enabled={tierConfig.shader.enableShaderLines} />
 
       <mesh ref={vortexRef}>
-        <icosahedronGeometry args={[1, 5]} />
+        <icosahedronGeometry args={[1, tierConfig.mesh.primaryDetail]} />
         <meshStandardMaterial
           ref={vortexMaterialRef}
           color="#120712"
@@ -217,12 +219,12 @@ export function Act5Convergence({ progress, visible }: ActProps) {
       </mesh>
 
       <mesh ref={singularityRef}>
-        <sphereGeometry args={[1, 48, 48]} />
+        <sphereGeometry args={[1, tierConfig.mesh.secondaryDetail, tierConfig.mesh.secondaryDetail]} />
         <meshBasicMaterial color="#020203" toneMapped={false} />
       </mesh>
 
       <mesh ref={innerCoreRef}>
-        <icosahedronGeometry args={[1, 4]} />
+        <icosahedronGeometry args={[1, tierConfig.mesh.tertiaryDetail]} />
         <meshBasicMaterial
           ref={innerCoreMaterialRef}
           color="#ffffff"
@@ -235,7 +237,7 @@ export function Act5Convergence({ progress, visible }: ActProps) {
       </mesh>
 
       <mesh ref={diskRef} rotation={[Math.PI / 2.18, 0.08, 0.04]}>
-        <ringGeometry args={[1.7, 5.9, 96, 3]} />
+        <ringGeometry args={[1.7, 5.9, tierConfig.mesh.circleSegments, 3]} />
         <meshBasicMaterial
           color="#ff7eb3"
           transparent
@@ -247,7 +249,7 @@ export function Act5Convergence({ progress, visible }: ActProps) {
       </mesh>
 
       <mesh ref={secondaryDiskRef} rotation={[Math.PI / 1.74, 0.3, 0.52]}>
-        <ringGeometry args={[1.4, 4.6, 96, 2]} />
+        <ringGeometry args={[1.4, 4.6, tierConfig.mesh.circleSegments, 2]} />
         <meshBasicMaterial
           color="#d0a2ff"
           transparent
@@ -276,19 +278,19 @@ export function Act5Convergence({ progress, visible }: ActProps) {
 
       <pointLight
         color="#ff7eb3"
-        intensity={progress * 24}
+        intensity={progress * 24 * tierConfig.material.emissiveScale}
         distance={36}
         decay={2}
       />
       <pointLight
         color="#ffffff"
-        intensity={progress * 5}
+        intensity={progress * 5 * tierConfig.material.emissiveScale}
         distance={14}
         decay={2}
       />
       <pointLight
         color="#d0a2ff"
-        intensity={progress * 6}
+        intensity={progress * 6 * tierConfig.material.emissiveScale}
         distance={24}
         decay={2}
         position={[0, 4.2, -1]}

@@ -7,6 +7,7 @@ import { useCapsStore } from "@/stores/capsStore";
 import { useScrollStore } from "@/stores/scrollStore";
 import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { WORLD_PHASES } from "../viewportProfiles";
+import { computeCrossfadeBlend } from "@/lib/transition";
 
 function nextPhaseIndex(index: number) {
   return (index + 1) % WORLD_PHASES.length;
@@ -29,6 +30,10 @@ export function PostProcessingStack() {
 
   const currentProfile = WORLD_PHASES[activeAct];
   const nextProfile = WORLD_PHASES[nextPhaseIndex(activeAct)];
+  const blendT = computeCrossfadeBlend(
+    actProgress,
+    currentProfile.transitionRig
+  );
   const tierOverride =
     caps.tier != null ? currentProfile.tierOverrides[caps.tier] : undefined;
 
@@ -47,7 +52,7 @@ export function PostProcessingStack() {
   const chromaticBase = currentProfile.postFxProfile.chromaticOffset;
   const nextChromaticBase = nextProfile.postFxProfile.chromaticOffset;
   const chromaticLerped =
-    chromaticBase + (nextChromaticBase - chromaticBase) * actProgress;
+    chromaticBase + (nextChromaticBase - chromaticBase) * blendT;
   const chromaticScaled =
     chromaticLerped * (tierOverride?.chromaticOffsetMultiplier ?? 1);
   const chromaticOffset: [number, number] =
@@ -59,11 +64,11 @@ export function PostProcessingStack() {
     <EffectComposer multisampling={0}>
       <Bloom
         luminanceThreshold={
-          bloomThreshold + (nextBloomThreshold - bloomThreshold) * actProgress
+          bloomThreshold + (nextBloomThreshold - bloomThreshold) * blendT
         }
         luminanceSmoothing={0.025}
         intensity={
-          bloomIntensity + (nextBloomIntensity - bloomIntensity) * actProgress
+          bloomIntensity + (nextBloomIntensity - bloomIntensity) * blendT
         }
         mipmapBlur
       />
@@ -72,12 +77,12 @@ export function PostProcessingStack() {
           currentProfile.postFxProfile.vignetteOffset +
           (nextProfile.postFxProfile.vignetteOffset -
             currentProfile.postFxProfile.vignetteOffset) *
-            actProgress
+            blendT
         }
         darkness={
           vignetteDarkness +
           (nextProfile.postFxProfile.vignetteDarkness - vignetteDarkness) *
-            actProgress
+            blendT
         }
         blendFunction={BlendFunction.NORMAL}
       />

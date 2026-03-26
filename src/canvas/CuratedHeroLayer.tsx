@@ -24,6 +24,11 @@ import {
   type WorldPhaseProfile,
 } from "./viewportProfiles";
 import { Act6QuantumConsciousness } from "./acts/Act6QuantumConsciousness";
+import { Act1Emergence } from "./acts/Act1Emergence";
+import { Act2Structure } from "./acts/Act2Structure";
+import { Act3Flow } from "./acts/Act3Flow";
+import { Act4Quantum } from "./acts/Act4Quantum";
+import { Act5Convergence } from "./acts/Act5Convergence";
 
 interface CuratedHeroLayerProps {
   activeMetricIndex: number;
@@ -916,6 +921,22 @@ export function CuratedHeroLayer({
 }: CuratedHeroLayerProps) {
   const runtimeCaps = useCapsStore((state) => state.caps);
 
+  // Progressive asset preloading: only load the current act and the next two so
+  // assets for acts 3-5 are not downloaded until the user scrolls toward them.
+  useEffect(() => {
+    const ASSETS_BY_ACT: string[][] = [
+      [HERO_ASSET_PATHS.dark_star],
+      [HERO_ASSET_PATHS.wireframe_globe],
+      [HERO_ASSET_PATHS.hologram],
+      [HERO_ASSET_PATHS.quantum_leap, HERO_ASSET_PATHS.paradox_abstract],
+      [HERO_ASSET_PATHS.black_hole],
+    ];
+    const limit = Math.min(activeMetricIndex + 2, ASSETS_BY_ACT.length - 1);
+    for (let i = activeMetricIndex; i <= limit; i++) {
+      ASSETS_BY_ACT[i].forEach((path) => useGLTF.preload(path));
+    }
+  }, [activeMetricIndex]);
+
   return (
     <>
       {/* Each hero has its own Suspense boundary so they mount independently as their
@@ -932,6 +953,12 @@ export function CuratedHeroLayer({
         />
       </Suspense>
       <Suspense fallback={null}>
+        <Act1Emergence
+          progress={weights[0] + rebirthBlend}
+          visible={(weights[0] + rebirthBlend) > 0.01}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
         <ScaffoldHero
           profile={WORLD_PHASES[1]}
           reportMetric={activeMetricIndex === 1}
@@ -939,6 +966,12 @@ export function CuratedHeroLayer({
           worldAnchor={worldAnchor}
           pointerOffset={pointerOffset}
           runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Act2Structure
+          progress={weights[1]}
+          visible={weights[1] > 0.01}
         />
       </Suspense>
       <Suspense fallback={null}>
@@ -952,6 +985,12 @@ export function CuratedHeroLayer({
         />
       </Suspense>
       <Suspense fallback={null}>
+        <Act3Flow
+          progress={weights[2]}
+          visible={weights[2] > 0.01}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
         <SentienceHero
           profile={WORLD_PHASES[3]}
           reportMetric={activeMetricIndex === 3}
@@ -959,6 +998,12 @@ export function CuratedHeroLayer({
           worldAnchor={worldAnchor}
           pointerOffset={pointerOffset}
           runtimeCaps={runtimeCaps}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Act4Quantum
+          progress={weights[3]}
+          visible={weights[3] > 0.01}
         />
       </Suspense>
       <Suspense fallback={null}>
@@ -972,6 +1017,12 @@ export function CuratedHeroLayer({
         />
       </Suspense>
       <Suspense fallback={null}>
+        <Act5Convergence
+          progress={weights[4]}
+          visible={weights[4] > 0.01}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
         <Act6QuantumConsciousness
           progress={weights[5] ?? 0}
           visible={(weights[5] ?? 0) > 0.01}
@@ -981,9 +1032,6 @@ export function CuratedHeroLayer({
   );
 }
 
+// Preload only the first-act hero immediately; remaining heroes are loaded
+// progressively via CuratedHeroLayer as the user scrolls into each act.
 useGLTF.preload(HERO_ASSET_PATHS.dark_star);
-useGLTF.preload(HERO_ASSET_PATHS.wireframe_globe);
-useGLTF.preload(HERO_ASSET_PATHS.hologram);
-useGLTF.preload(HERO_ASSET_PATHS.quantum_leap);
-useGLTF.preload(HERO_ASSET_PATHS.paradox_abstract);
-useGLTF.preload(HERO_ASSET_PATHS.black_hole);

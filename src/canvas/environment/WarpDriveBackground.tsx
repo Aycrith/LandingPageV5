@@ -111,13 +111,23 @@ declare module "@react-three/fiber" {
 
 interface WarpDriveBackgroundProps {
   progress: number;
+  enabled?: boolean;
+  opacityScale?: number;
 }
 
-export function WarpDriveBackground({ progress }: WarpDriveBackgroundProps) {
+export function WarpDriveBackground({
+  progress,
+  enabled = true,
+  opacityScale = 1,
+}: WarpDriveBackgroundProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
   const resVec = useMemo(() => new THREE.Vector2(1920, 1080), []);
   const mouseVec = useMemo(() => new THREE.Vector2(0.5, 0.5), []);
+
+  if (!enabled) {
+    return null;
+  }
 
   useFrame((state) => {
     if (!matRef.current) return;
@@ -128,7 +138,7 @@ export function WarpDriveBackground({ progress }: WarpDriveBackgroundProps) {
     mouseVec.set(x, y);
     matRef.current.iMouse = mouseVec;
     // Fade in with act progress
-    matRef.current.uOpacity = Math.min(progress / 0.3, 1) * 0.85;
+    matRef.current.uOpacity = Math.min(progress / 0.3, 1) * 0.85 * opacityScale;
   });
 
   return (

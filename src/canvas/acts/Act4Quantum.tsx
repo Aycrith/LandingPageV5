@@ -15,6 +15,7 @@ import {
   useStableSceneClone,
 } from "@/lib/scene";
 import { useRepeatingTexture } from "@/lib/textures";
+import { useActMaterialTierConfig, getTextureSamplingOptions } from "./materialTierConfig";
 import { DottedWave } from "@/canvas/environment/DottedWave";
 
 interface ActProps {
@@ -127,7 +128,8 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   const quantumModelGroupRef = useRef<THREE.Group>(null);
   const paradoxModelGroupRef = useRef<THREE.Group>(null);
 
-  const orbitalCount = 64;
+  const tierConfig = useActMaterialTierConfig(3);
+  const orbitalCount = tierConfig.mesh.orbitalCount;
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   const orbitalData = useMemo(() => {
@@ -143,7 +145,7 @@ export function Act4Quantum({ progress, visible }: ActProps) {
       scale: 0.014 + seededUnit(i * 29 + 6) * 0.032,
       attractorBias: seededUnit(i * 29 + 7),
     }));
-  }, []);
+  }, [orbitalCount]);
 
   const quatTempRef = useRef(new THREE.Quaternion());
   const posTempRef = useRef(new THREE.Vector3());
@@ -223,20 +225,20 @@ export function Act4Quantum({ progress, visible }: ActProps) {
       <DottedWave progress={progress} color="#ffd06f" yOffset={-4.1} />
 
       <mesh ref={attractor1Ref}>
-        <dodecahedronGeometry args={[0.5, 2]} />
+        <dodecahedronGeometry args={[0.5, tierConfig.mesh.primaryDetail]} />
         <CrystalMaterial
           color="#ffd06f"
-          fresnelPower={2.0}
-          iridescenceStrength={0.8}
+          fresnelPower={tierConfig.shader.crystalFresnel}
+          iridescenceStrength={tierConfig.shader.crystalIridescence}
         />
       </mesh>
 
       <mesh ref={attractor2Ref}>
-        <dodecahedronGeometry args={[0.5, 2]} />
+        <dodecahedronGeometry args={[0.5, tierConfig.mesh.primaryDetail]} />
         <CrystalMaterial
           color="#ff7eb3"
-          fresnelPower={2.0}
-          iridescenceStrength={0.8}
+          fresnelPower={tierConfig.shader.crystalFresnel}
+          iridescenceStrength={tierConfig.shader.crystalIridescence}
         />
       </mesh>
 
@@ -276,7 +278,7 @@ export function Act4Quantum({ progress, visible }: ActProps) {
         />
       </instancedMesh>
 
-      <EnergyBeam progress={progress} />
+      <EnergyBeam progress={progress} beamPoints={tierConfig.mesh.beamPoints} />
       <Ground103Floor progress={progress} />
 
       <Suspense fallback={null}>
@@ -290,14 +292,14 @@ export function Act4Quantum({ progress, visible }: ActProps) {
 
       <pointLight
         color="#ffd06f"
-        intensity={10}
+        intensity={10 * tierConfig.material.emissiveScale}
         distance={18}
         decay={2}
         position={[-3, 0, 0]}
       />
       <pointLight
         color="#ff7eb3"
-        intensity={10}
+        intensity={10 * tierConfig.material.emissiveScale}
         distance={18}
         decay={2}
         position={[3, 0, 0]}
@@ -306,19 +308,19 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   );
 }
 
-function EnergyBeam({ progress }: { progress: number }) {
+function EnergyBeam({ progress, beamPoints }: { progress: number; beamPoints: number }) {
   const positionAttrRef = useRef<THREE.BufferAttribute>(null);
   const materialRef = useRef<THREE.LineBasicMaterial>(null);
   const positions = useMemo(() => {
-    const data = new Float32Array(50 * 3);
-    for (let i = 0; i < 50; i++) {
-      const t = i / 49;
+    const data = new Float32Array(beamPoints * 3);
+    for (let i = 0; i < beamPoints; i++) {
+      const t = i / (beamPoints - 1);
       data[i * 3] = t * 2 - 1;
       data[i * 3 + 1] = 0;
       data[i * 3 + 2] = 0;
     }
     return data;
-  }, []);
+  }, [beamPoints]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -362,21 +364,21 @@ function EnergyBeam({ progress }: { progress: number }) {
 }
 
 function Ground103Floor({ progress }: { progress: number }) {
+  const tierConfig = useActMaterialTierConfig(3);
+  const colorOpts = getTextureSamplingOptions(tierConfig.texture, { repeat: 8, colorSpace: THREE.SRGBColorSpace });
+  const mapOpts = getTextureSamplingOptions(tierConfig.texture, { repeat: 8 });
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const colorMap = useRepeatingTexture(
     "/textures/pbr/ground103/Ground103_2K-PNG_Color.png",
-    {
-      repeat: 8,
-      colorSpace: THREE.SRGBColorSpace,
-    }
+    colorOpts
   );
   const normalMap = useRepeatingTexture(
     "/textures/pbr/ground103/Ground103_2K-PNG_NormalGL.png",
-    { repeat: 8 }
+    mapOpts
   );
   const roughnessMap = useRepeatingTexture(
     "/textures/pbr/ground103/Ground103_2K-PNG_Roughness.png",
-    { repeat: 8 }
+    mapOpts
   );
 
   useFrame(() => {
@@ -387,17 +389,17 @@ function Ground103Floor({ progress }: { progress: number }) {
 
   return (
     <mesh rotation-x={-Math.PI / 2} position={[0, -6, 0]}>
-      <circleGeometry args={[28, 64]} />
+      <circleGeometry args={[28, tierConfig.mesh.circleSegments]} />
       <meshStandardMaterial
         ref={matRef}
-        map={colorMap}
-        normalMap={normalMap}
-        roughnessMap={roughnessMap}
+        map={tierConfig.texture.useColorMap ? colorMap : null}
+        normalMap={tierConfig.texture.useNormalMap ? normalMap : null}
+        roughnessMap={tierConfig.texture.useRoughnessMap ? roughnessMap : null}
         roughness={0.9}
         metalness={0.05}
         transparent
         opacity={0}
-        envMapIntensity={0.7}
+        envMapIntensity={0.7 * tierConfig.material.envMapScale}
         depthWrite={false}
       />
     </mesh>

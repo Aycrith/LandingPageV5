@@ -63,11 +63,19 @@ declare module "@react-three/fiber" {
 
 interface ShaderLinesFieldProps {
   progress: number;
+  enabled?: boolean;
 }
 
-export function ShaderLinesField({ progress }: ShaderLinesFieldProps) {
+export function ShaderLinesField({
+  progress,
+  enabled = true,
+}: ShaderLinesFieldProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
+
+  if (!enabled) {
+    return null;
+  }
 
   useFrame((state) => {
     if (!matRef.current) return;

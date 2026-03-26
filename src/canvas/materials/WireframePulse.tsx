@@ -11,6 +11,8 @@ const WireframePulseShaderMaterial = shaderMaterial(
     uColor: new THREE.Color("#6dc7ff"),
     uPulseSpeed: 1.5,
     uPulseWidth: 0.15,
+    uSecondaryPulseMix: 1.0,
+    uFresnelStrength: 1.0,
   },
   // Vertex
   `
@@ -31,6 +33,8 @@ const WireframePulseShaderMaterial = shaderMaterial(
   uniform vec3 uColor;
   uniform float uPulseSpeed;
   uniform float uPulseWidth;
+  uniform float uSecondaryPulseMix;
+  uniform float uFresnelStrength;
 
   varying vec3 vPosition;
   varying vec3 vNormal;
@@ -48,11 +52,11 @@ const WireframePulseShaderMaterial = shaderMaterial(
     pulse2 = smoothstep(0.5 - uPulseWidth, 0.5, pulse2) *
              smoothstep(0.5 + uPulseWidth, 0.5, pulse2);
 
-    float totalPulse = max(pulse, pulse2);
+    float totalPulse = max(pulse, pulse2 * uSecondaryPulseMix);
 
     // Fresnel for edge visibility
     vec3 viewDir = normalize(cameraPosition - vPosition);
-    float fresnel = pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 1.5);
+    float fresnel = pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 1.5) * uFresnelStrength;
 
     // Base wireframe visibility + pulse highlight
     float alpha = 0.3 + fresnel * 0.3 + totalPulse * 0.8;
@@ -74,11 +78,17 @@ declare module "@react-three/fiber" {
 interface WireframePulseMaterialProps {
   color?: string;
   pulseSpeed?: number;
+  pulseWidth?: number;
+  secondaryPulseMix?: number;
+  fresnelStrength?: number;
 }
 
 export function WireframePulseMaterial({
   color = "#6dc7ff",
   pulseSpeed = 1.5,
+  pulseWidth = 0.15,
+  secondaryPulseMix = 1,
+  fresnelStrength = 1,
 }: WireframePulseMaterialProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
@@ -99,7 +109,9 @@ export function WireframePulseMaterial({
       uTime={0}
       uColor={new THREE.Color(color)}
       uPulseSpeed={pulseSpeed}
-      uPulseWidth={0.15}
+      uPulseWidth={pulseWidth}
+      uSecondaryPulseMix={secondaryPulseMix}
+      uFresnelStrength={fresnelStrength}
     />
   );
 }

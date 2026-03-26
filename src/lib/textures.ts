@@ -1,11 +1,15 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
-interface SharedTextureOptions {
+export interface SharedTextureOptions {
   repeat?: number;
   colorSpace?: THREE.ColorSpace;
   wrapS?: THREE.Wrapping;
   wrapT?: THREE.Wrapping;
+  anisotropy?: number;
+  generateMipmaps?: boolean;
+  minFilter?: THREE.TextureFilter;
+  magFilter?: THREE.MagnificationTextureFilter;
 }
 
 interface CachedTexture {
@@ -18,7 +22,16 @@ const textureCache = new Map<string, CachedTexture>();
 
 function createTextureKey(
   url: string,
-  { repeat = 1, colorSpace, wrapS, wrapT }: SharedTextureOptions
+  {
+    repeat = 1,
+    colorSpace,
+    wrapS,
+    wrapT,
+    anisotropy,
+    generateMipmaps,
+    minFilter,
+    magFilter,
+  }: SharedTextureOptions
 ): string {
   return [
     url,
@@ -26,6 +39,10 @@ function createTextureKey(
     colorSpace ?? "default",
     wrapS ?? THREE.ClampToEdgeWrapping,
     wrapT ?? THREE.ClampToEdgeWrapping,
+    anisotropy ?? 1,
+    generateMipmaps ?? true,
+    minFilter ?? THREE.LinearMipmapLinearFilter,
+    magFilter ?? THREE.LinearFilter,
   ].join("|");
 }
 
@@ -36,11 +53,19 @@ function configureTexture(
     colorSpace,
     wrapS = THREE.ClampToEdgeWrapping,
     wrapT = THREE.ClampToEdgeWrapping,
+    anisotropy = 1,
+    generateMipmaps = true,
+    minFilter = THREE.LinearMipmapLinearFilter,
+    magFilter = THREE.LinearFilter,
   }: SharedTextureOptions
 ) {
   texture.wrapS = wrapS;
   texture.wrapT = wrapT;
   texture.repeat.set(repeat, repeat);
+  texture.anisotropy = anisotropy;
+  texture.generateMipmaps = generateMipmaps;
+  texture.minFilter = minFilter;
+  texture.magFilter = magFilter;
   if (colorSpace) {
     texture.colorSpace = colorSpace;
   }
@@ -90,6 +115,10 @@ export function useSharedTexture(
     colorSpace,
     wrapS = THREE.ClampToEdgeWrapping,
     wrapT = THREE.ClampToEdgeWrapping,
+    anisotropy = 1,
+    generateMipmaps = true,
+    minFilter = THREE.LinearMipmapLinearFilter,
+    magFilter = THREE.LinearFilter,
   } = options;
 
   const key = useMemo(
@@ -99,8 +128,22 @@ export function useSharedTexture(
         colorSpace,
         wrapS,
         wrapT,
+        anisotropy,
+        generateMipmaps,
+        minFilter,
+        magFilter,
       }),
-    [url, repeat, colorSpace, wrapS, wrapT]
+    [
+      url,
+      repeat,
+      colorSpace,
+      wrapS,
+      wrapT,
+      anisotropy,
+      generateMipmaps,
+      minFilter,
+      magFilter,
+    ]
   );
 
   const texture = useMemo(
@@ -110,8 +153,23 @@ export function useSharedTexture(
         colorSpace,
         wrapS,
         wrapT,
+        anisotropy,
+        generateMipmaps,
+        minFilter,
+        magFilter,
       }),
-    [key, url, repeat, colorSpace, wrapS, wrapT]
+    [
+      key,
+      url,
+      repeat,
+      colorSpace,
+      wrapS,
+      wrapT,
+      anisotropy,
+      generateMipmaps,
+      minFilter,
+      magFilter,
+    ]
   );
 
   useEffect(() => () => releaseTexture(key), [key]);
