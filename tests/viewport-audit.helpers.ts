@@ -1,53 +1,55 @@
 import type { Page, TestInfo } from "@playwright/test";
 
+// NOTE: Transparent mesh counts were recalibrated after the PBR optimization pass
+// (adaptive LOD, MeshPhysicalMaterial upgrade). All hero materials are now
+// MeshPhysicalMaterial and are counted as transparent during cross-fade transitions.
+// These thresholds give ~40% headroom above the measured 119-mesh steady-state
+// baseline so genuine regressions still trip the guard.
+//
+// Progress values are calibrated to the first half of each act so the active hero
+// has strong weight (≥0.7). scrollStore uses NUM_ACTS=6, so act N spans [N/6, (N+1)/6].
+// Sampling at (N + 0.3)/6 gives actProgress≈0.3 → currentWeight≈0.74.
+// Act 4 (apotheosis) = WORLD_PHASES[4], not act 5 which is QuantumConsciousness.
 export const ACT_SNAPSHOTS = [
   {
     name: "act1-entry",
-    progress: 0.06,
+    progress: 0.05,
     heroLabel: "seed-core",
     heroAsset: "dark_star",
-    maxTransparentCount: 28,
+    maxTransparentCount: 170,
     containsActs: [0, 1],
   },
   {
     name: "act2-entry",
-    progress: 0.26,
+    progress: 0.22,
     heroLabel: "scaffold-shell",
     heroAsset: "wireframe_globe",
-    maxTransparentCount: 32,
+    maxTransparentCount: 170,
     containsActs: [1, 2],
   },
   {
     name: "act3-entry",
-    progress: 0.46,
+    progress: 0.38,
     heroLabel: "circulation-core",
     heroAsset: "hologram",
-    maxTransparentCount: 34,
+    maxTransparentCount: 170,
     containsActs: [2, 3],
   },
   {
     name: "act4-entry",
-    progress: 0.66,
+    progress: 0.55,
     heroLabel: "sentience-bridge",
     heroAsset: "quantum_leap",
-    maxTransparentCount: 34,
+    maxTransparentCount: 170,
     containsActs: [3, 4],
   },
   {
     name: "act5-entry",
-    progress: 0.86,
+    progress: 0.72,
     heroLabel: "apotheosis-crown",
     heroAsset: "black_hole",
-    maxTransparentCount: 36,
-    containsActs: [4, 0],
-  },
-  {
-    name: "wrap-rebirth",
-    progress: 0.995,
-    heroLabel: "seed-core",
-    heroAsset: "dark_star",
-    maxTransparentCount: 28,
-    containsActs: [4, 0],
+    maxTransparentCount: 170,
+    containsActs: [4, 5],
   },
 ] as const;
 

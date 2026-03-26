@@ -5,8 +5,15 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { type QualityTier } from "@/stores/capsStore";
 import { useCursorStore } from "@/stores/cursorStore";
+import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { useRepeatingTexture } from "@/lib/textures";
 import { seededUnit } from "@/lib/random";
+import {
+  computeViewportFillRatio,
+  getViewportHeightAtDistance,
+  resolveDetailLod,
+  type DetailLod,
+} from "@/lib/scene";
 import { CuratedHeroLayer } from "./CuratedHeroLayer";
 import { VolumetricUI } from "./VolumetricUI";
 import { WORLD_PHASES } from "./viewportProfiles";
@@ -109,6 +116,7 @@ export function SeamlessWorld({
   const shadowMaterialRef = useRef<THREE.ShadowMaterial>(null);
   const shadowPlaneRef = useRef<THREE.Mesh>(null);
   const sporesRef = useRef<THREE.Points>(null);
+  const worldLodRef = useRef<DetailLod | null>(null);
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const worldAnchor = useMemo(() => new THREE.Vector3(), []);
@@ -228,6 +236,31 @@ export function SeamlessWorld({
       Math.pow(cursor.x - 0.5, 2) + Math.pow(cursor.y - 0.5, 2)
     );
     const cursorProximity = Math.max(0, 1 - cursorCenterDist * 4);
+    const camera = state.camera as THREE.PerspectiveCamera;
+    const worldDistance = worldAnchor.distanceTo(camera.position);
+    const visibleHeight = getViewportHeightAtDistance(worldDistance, camera.fov);
+    const stageHeight = THREE.MathUtils.lerp(
+      currentProfile.stageVolume.height,
+      nextProfile.stageVolume.height,
+      phaseBlend
+    );
+    const worldFillRatio = computeViewportFillRatio(stageHeight * 0.52, 1, visibleHeight);
+    const worldLod = resolveDetailLod({
+      distance: worldDistance,
+      fillRatio: worldFillRatio,
+      tier,
+    });
+    const fogLodMultiplier =
+      worldLod === "cinematic" ? 1 : worldLod === "balanced" ? 0.78 : 0.52;
+    const particleLodMultiplier =
+      worldLod === "cinematic" ? 1 : worldLod === "balanced" ? 0.72 : 0.48;
+    const shadowLodMultiplier =
+      worldLod === "cinematic" ? 1 : worldLod === "balanced" ? 0.82 : 0.6;
+
+    if (worldLodRef.current !== worldLod) {
+      worldLodRef.current = worldLod;
+      useViewportAuditStore.getState().reportSceneState({ activeWorldLod: worldLod });
+    }
 
     if (chamberRef.current) {
       chamberRef.current.rotation.y = t * 0.01;
@@ -269,7 +302,7 @@ export function SeamlessWorld({
           currentProfile.fogProfile.layerOpacity,
           nextProfile.fogProfile.layerOpacity,
           phaseBlend
-        ) * 0.72;
+        ) * 0.72 * fogLodMultiplier;
     }
     if (fogNearMaterialRef.current) {
       fogNearMaterialRef.current.color.copy(fogColor);
@@ -278,7 +311,7 @@ export function SeamlessWorld({
           currentProfile.fogProfile.layerOpacity,
           nextProfile.fogProfile.layerOpacity,
           phaseBlend
-        ) * 0.54;
+        ) * 0.54 * fogLodMultiplier;
     }
     if (fogFrontMaterialRef.current) {
       fogFrontMaterialRef.current.color.copy(fogColor);
@@ -287,7 +320,7 @@ export function SeamlessWorld({
           currentProfile.fogProfile.foregroundOpacity,
           nextProfile.fogProfile.foregroundOpacity,
           phaseBlend
-        ) * 0.6;
+        ) * 0.6 * fogLodMultiplier;
     }
 
     if (seedGroupRef.current) {
@@ -413,7 +446,8 @@ export function SeamlessWorld({
       material.opacity =
         currentProfile.ambientParticleMode === "none" && nextProfile.ambientParticleMode === "none"
           ? 0
-          : 0.06 + currentWeight * 0.05;
+          : (0.06 + currentWeight * 0.05) * particleLodMultiplier;
+      material.size = (worldLod === "streamlined" ? 0.03 : 0.035) + currentWeight * 0.002;
       sporeColorNext.set(nextProfile.accent);
       sporeColorLerp.set(currentProfile.accent).lerp(sporeColorNext, phaseBlend);
       material.color.copy(sporeColorLerp);
@@ -446,7 +480,7 @@ export function SeamlessWorld({
             currentProfile.shadowProfile.opacity,
             nextProfile.shadowProfile.opacity,
             phaseBlend
-          )
+          ) * shadowLodMultiplier
         : 0;
     }
 

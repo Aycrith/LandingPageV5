@@ -7,6 +7,7 @@ import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { useCapsStore } from "@/stores/capsStore";
 import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useScrollStore } from "@/stores/scrollStore";
+import { evaluateRenderBudget } from "@/lib/scene";
 
 const MAX_SAMPLES = 600;
 const PUBLISH_EVERY_FRAMES = 12;
@@ -47,6 +48,10 @@ interface CompositionSnapshot {
   additiveMeshCount: number;
   linesCount: number;
   pointsCount: number;
+  physicalMaterialCount: number;
+  transmissionMaterialCount: number;
+  iridescentMaterialCount: number;
+  shadowCasterCount: number;
 }
 
 function isActuallyVisible(node: THREE.Object3D | null): boolean {
@@ -92,6 +97,10 @@ function collectMeshSnapshot(scene: THREE.Scene) {
     additiveMeshCount: 0,
     linesCount: 0,
     pointsCount: 0,
+    physicalMaterialCount: 0,
+    transmissionMaterialCount: 0,
+    iridescentMaterialCount: 0,
+    shadowCasterCount: 0,
   };
 
   scene.traverse((node) => {
@@ -104,6 +113,9 @@ function collectMeshSnapshot(scene: THREE.Scene) {
     }
 
     composition.visibleMeshCount += 1;
+    if (child.isMesh && child.castShadow) {
+      composition.shadowCasterCount += 1;
+    }
     if (child.isPoints) {
       composition.pointsCount += 1;
     }
@@ -132,6 +144,18 @@ function collectMeshSnapshot(scene: THREE.Scene) {
       }
       if (material.blending === THREE.AdditiveBlending && material.opacity > 0.01) {
         composition.additiveMeshCount += 1;
+      }
+      if (
+        material.type === "MeshPhysicalMaterial" ||
+        material.type === "MeshStandardMaterial"
+      ) {
+        composition.physicalMaterialCount += 1;
+      }
+      if ((material.transmission ?? 0) > 0.02) {
+        composition.transmissionMaterialCount += 1;
+      }
+      if ((material.iridescence ?? 0) > 0.02) {
+        composition.iridescentMaterialCount += 1;
       }
 
       return {
@@ -208,6 +232,10 @@ export function ViewportAuditProbe() {
     additiveMeshCount: 0,
     linesCount: 0,
     pointsCount: 0,
+    physicalMaterialCount: 0,
+    transmissionMaterialCount: 0,
+    iridescentMaterialCount: 0,
+    shadowCasterCount: 0,
   });
 
   const publishTelemetry = useEffectEvent(() => {
@@ -242,21 +270,52 @@ export function ViewportAuditProbe() {
       return;
     }
 
+    const loadState = useSceneLoadStore.getState();
+    const capsState = useCapsStore.getState();
+    const startupTimeMs = loadState.stableFrameReady
+      ? Date.now() - loadState.startupStartedAt
+      : null;
     const { composition } = collectMeshSnapshot(scene);
     latestCompositionRef.current = composition;
+    const meanDeltaMs = mean(deltaSamplesRef.current);
+    const budget = capsState.caps
+      ? evaluateRenderBudget({
+          budgets: capsState.caps.budgets,
+          meanDeltaMs,
+          renderer: latestRendererRef.current,
+          startupTimeMs,
+        })
+      : evaluateRenderBudget({
+          budgets: {
+            fps: 30,
+            drawCalls: 50,
+            triangles: 180000,
+            geometries: 72,
+            textures: 18,
+            programs: 10,
+            points: 12000,
+            textureMemoryMB: 64,
+            loadTimeMs: 6000,
+            frameTimeMs: 33.3,
+          },
+          meanDeltaMs,
+          renderer: latestRendererRef.current,
+          startupTimeMs,
+        });
     useViewportAuditStore.getState().reportComposition(composition);
     useViewportAuditStore.getState().reportRenderPipeline({
       samples: deltaSamplesRef.current.length,
       meanCpuMs: mean(cpuSamplesRef.current),
       p95CpuMs: percentile(cpuSamplesRef.current, 0.95),
       maxCpuMs: percentile(cpuSamplesRef.current, 1),
-      meanDeltaMs: mean(deltaSamplesRef.current),
+      meanDeltaMs,
       p95DeltaMs: percentile(deltaSamplesRef.current, 0.95),
       maxDeltaMs: percentile(deltaSamplesRef.current, 1),
       over33DeltaMs: deltaSamplesRef.current.filter((sample) => sample > 33).length,
       over50DeltaMs: deltaSamplesRef.current.filter((sample) => sample > 50).length,
       over100DeltaMs: deltaSamplesRef.current.filter((sample) => sample > 100).length,
       renderer: latestRendererRef.current,
+      budget,
     });
     publishTelemetry();
   });
@@ -294,6 +353,8 @@ export function ViewportAuditProbe() {
         programs: Array.isArray(programsInfo) ? programsInfo.length : 0,
       };
 
+      publishTelemetry();
+
       if (frameCountRef.current % PUBLISH_EVERY_FRAMES === 0) {
         publishMetrics();
       }
@@ -304,7 +365,7 @@ export function ViewportAuditProbe() {
       stopAfterRender();
       stopBeforeRender();
     };
-  }, [enabled, gl, publishMetrics]);
+  }, [enabled, gl]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

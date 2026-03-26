@@ -5,6 +5,11 @@ export type QualityTier = "high" | "medium" | "low";
 export interface Budgets {
   fps: number;
   drawCalls: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+  programs: number;
+  points: number;
   textureMemoryMB: number;
   loadTimeMs: number;
   frameTimeMs: number;
@@ -44,6 +49,11 @@ const QUALITY_PROFILES: Record<
     budgets: {
       fps: 60,
       drawCalls: 150,
+      triangles: 900000,
+      geometries: 180,
+      textures: 48,
+      programs: 18,
+      points: 75000,
       textureMemoryMB: 256,
       loadTimeMs: 5000,
       frameTimeMs: 16.6,
@@ -57,6 +67,11 @@ const QUALITY_PROFILES: Record<
     budgets: {
       fps: 60,
       drawCalls: 100,
+      triangles: 450000,
+      geometries: 120,
+      textures: 30,
+      programs: 14,
+      points: 28000,
       textureMemoryMB: 128,
       loadTimeMs: 4000,
       frameTimeMs: 16.6,
@@ -70,6 +85,11 @@ const QUALITY_PROFILES: Record<
     budgets: {
       fps: 30,
       drawCalls: 50,
+      triangles: 180000,
+      geometries: 72,
+      textures: 18,
+      programs: 10,
+      points: 12000,
       textureMemoryMB: 64,
       loadTimeMs: 6000,
       frameTimeMs: 33.3,

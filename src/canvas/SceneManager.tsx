@@ -25,9 +25,12 @@ function nextPhaseIndex(index: number) {
 export function SceneManager() {
   const fogRef = useRef<THREE.FogExp2>(null);
   const ambientRef = useRef<THREE.AmbientLight>(null);
+  const hemisphereRef = useRef<THREE.HemisphereLight>(null);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
+  const keyTargetRef = useRef<THREE.Object3D>(null);
   const fillLightRef = useRef<THREE.PointLight>(null);
   const rimLightRef = useRef<THREE.SpotLight>(null);
+  const rimTargetRef = useRef<THREE.Object3D>(null);
   const practicalLightRef = useRef<THREE.PointLight>(null);
 
   const activeAct = useScrollStore((state) => state.activeAct);
@@ -60,6 +63,8 @@ export function SceneManager() {
 
   const fogColor = useMemo(() => new THREE.Color(), []);
   const keyColor = useMemo(() => new THREE.Color(), []);
+  const hemiSkyColor = useMemo(() => new THREE.Color(), []);
+  const hemiGroundColor = useMemo(() => new THREE.Color(), []);
   const fillColor = useMemo(() => new THREE.Color(), []);
   const rimColor = useMemo(() => new THREE.Color(), []);
   const practicalColor = useMemo(() => new THREE.Color(), []);
@@ -67,7 +72,20 @@ export function SceneManager() {
   const vectorB = useMemo(() => new THREE.Vector3(), []);
   const vectorC = useMemo(() => new THREE.Vector3(), []);
   const vectorD = useMemo(() => new THREE.Vector3(), []);
+  const vectorFocus = useMemo(() => new THREE.Vector3(), []);
 
+  useEffect(() => {
+    if (keyLightRef.current && keyTargetRef.current) {
+      keyLightRef.current.target = keyTargetRef.current;
+    }
+    if (rimLightRef.current && rimTargetRef.current) {
+      rimLightRef.current.target = rimTargetRef.current;
+    }
+  }, []);
+
+  // Scene-state and prune must only re-fire when the act actually changes —
+  // not when caps settle — so prune doesn't wipe heroModels right after heroes
+  // start reporting on a new act.
   useEffect(() => {
     const audit = useViewportAuditStore.getState();
     audit.reportSceneState({
@@ -86,6 +104,37 @@ export function SceneManager() {
     ambientParticleMode,
     currentProfile.overlayMode,
     mountedActs,
+  ]);
+
+  // Lighting pipeline report is safe to re-fire on caps/tier changes because it
+  // does not mutate hero model records.
+  useEffect(() => {
+    useViewportAuditStore.getState().reportLightingPipeline({
+      exposure: currentProfile.lightingRig.exposure,
+      environmentMode:
+        tier === "high"
+          ? "hdri-kloppenheim-4k"
+          : tier === "medium"
+            ? "preset-studio"
+            : "disabled",
+      shadowMapSize: tier === "high" && Boolean(caps?.enableShadows) ? 2048 : 0,
+      ambientIntensity: currentProfile.lightingRig.ambientIntensity,
+      hemisphereIntensity: Math.max(0.08, currentProfile.lightingRig.ambientIntensity * 0.9),
+      keyIntensity: currentProfile.lightingRig.key.intensity,
+      fillIntensity: currentProfile.lightingRig.fill.intensity,
+      rimIntensity: currentProfile.lightingRig.rim.intensity,
+      practicalIntensity: currentProfile.lightingRig.practical.intensity,
+    });
+  }, [
+    activeAct,
+    currentProfile.lightingRig.ambientIntensity,
+    currentProfile.lightingRig.exposure,
+    currentProfile.lightingRig.fill.intensity,
+    currentProfile.lightingRig.key.intensity,
+    currentProfile.lightingRig.practical.intensity,
+    currentProfile.lightingRig.rim.intensity,
+    caps?.enableShadows,
+    tier,
   ]);
 
   useFrame((state) => {
@@ -115,6 +164,34 @@ export function SceneManager() {
         nextProfile.lightingRig.ambientIntensity,
         blendT
       );
+    }
+
+    hemiSkyColor
+      .set(currentProfile.accent)
+      .lerp(new THREE.Color(nextProfile.accent), blendT);
+    hemiGroundColor
+      .set(currentProfile.lightingRig.fogColor)
+      .lerp(new THREE.Color(nextProfile.lightingRig.fogColor), blendT);
+    if (hemisphereRef.current) {
+      hemisphereRef.current.color.copy(hemiSkyColor);
+      hemisphereRef.current.groundColor.copy(hemiGroundColor);
+      hemisphereRef.current.intensity = THREE.MathUtils.lerp(
+        Math.max(0.08, currentProfile.lightingRig.ambientIntensity * 0.9),
+        Math.max(0.08, nextProfile.lightingRig.ambientIntensity * 0.9),
+        blendT
+      );
+    }
+
+    vectorFocus
+      .copy(tupleToVector3(currentProfile.worldAnchor))
+      .lerp(tupleToVector3(nextProfile.worldAnchor), blendT);
+    if (keyTargetRef.current) {
+      keyTargetRef.current.position.copy(vectorFocus);
+      keyTargetRef.current.updateMatrixWorld();
+    }
+    if (rimTargetRef.current) {
+      rimTargetRef.current.position.copy(vectorFocus);
+      rimTargetRef.current.updateMatrixWorld();
     }
 
     keyColor
@@ -203,6 +280,13 @@ export function SceneManager() {
         ref={ambientRef}
         intensity={currentProfile.lightingRig.ambientIntensity}
       />
+      <hemisphereLight
+        ref={hemisphereRef}
+        color={currentProfile.accent}
+        groundColor={currentProfile.lightingRig.fogColor}
+        intensity={Math.max(0.08, currentProfile.lightingRig.ambientIntensity * 0.9)}
+      />
+      <object3D ref={keyTargetRef} position={currentProfile.worldAnchor} />
       <directionalLight
         ref={keyLightRef}
         position={currentProfile.lightingRig.key.position}
@@ -212,6 +296,14 @@ export function SceneManager() {
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
         shadow-bias={-0.00015}
+        shadow-normalBias={0.03}
+        shadow-radius={3}
+        shadow-camera-near={1}
+        shadow-camera-far={currentProfile.stageVolume.depth + 8}
+        shadow-camera-left={-currentProfile.stageVolume.radius}
+        shadow-camera-right={currentProfile.stageVolume.radius}
+        shadow-camera-top={currentProfile.stageVolume.height}
+        shadow-camera-bottom={-currentProfile.stageVolume.height}
       />
       <pointLight
         ref={fillLightRef}
@@ -221,6 +313,7 @@ export function SceneManager() {
         distance={28}
         decay={2}
       />
+      <object3D ref={rimTargetRef} position={currentProfile.worldAnchor} />
       <spotLight
         ref={rimLightRef}
         position={currentProfile.lightingRig.rim.position}
@@ -228,7 +321,7 @@ export function SceneManager() {
         color={currentProfile.lightingRig.rim.color}
         angle={currentProfile.lightingRig.rim.angle}
         penumbra={0.92}
-        distance={32}
+        distance={currentProfile.stageVolume.depth + 18}
         decay={2}
       />
       <pointLight
@@ -236,7 +329,7 @@ export function SceneManager() {
         position={currentProfile.lightingRig.practical.position}
         intensity={currentProfile.lightingRig.practical.intensity}
         color={currentProfile.lightingRig.practical.color}
-        distance={14}
+        distance={Math.max(14, currentProfile.stageVolume.radius * 4)}
         decay={2}
       />
 

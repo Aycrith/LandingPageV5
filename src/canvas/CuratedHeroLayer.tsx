@@ -4,11 +4,16 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { useCapsStore, type RuntimeCaps } from "@/stores/capsStore";
 import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import {
+  computeViewportFillRatio,
   fitScaleToViewportFill,
   getViewportHeightAtDistance,
+  measureSceneBounds,
+  resolveDetailLod,
+  type DetailLod,
   useSceneBounds,
   useStableSceneClone,
 } from "@/lib/scene";
@@ -34,6 +39,7 @@ interface HeroSceneProps {
   weight: number;
   worldAnchor: THREE.Vector3;
   pointerOffset: THREE.Vector3;
+  runtimeCaps: RuntimeCaps | null;
 }
 
 type CuratedMaterial = THREE.MeshPhysicalMaterial & {
@@ -42,7 +48,66 @@ type CuratedMaterial = THREE.MeshPhysicalMaterial & {
     baseEmissiveIntensity?: number;
     prefersDepthWrite?: boolean;
     forceTransparent?: boolean;
+    baseRoughness?: number;
+    baseMetalness?: number;
+    baseTransmission?: number;
+    baseThickness?: number;
+    baseIridescence?: number;
+    baseClearcoat?: number;
+    baseClearcoatRoughness?: number;
+    baseEnvMapIntensity?: number;
   };
+};
+
+type CuratedMesh = THREE.Mesh & {
+  userData: THREE.Mesh["userData"] & {
+    baseCastShadow?: boolean;
+    baseReceiveShadow?: boolean;
+    detailWeight?: number;
+    hasExpensiveTransparency?: boolean;
+  };
+};
+
+interface PreparedHeroScene {
+  materials: CuratedMaterial[];
+  meshes: CuratedMesh[];
+}
+
+const HERO_LOD_PROFILES: Record<
+  DetailLod,
+  {
+    transmissionScale: number;
+    iridescenceScale: number;
+    clearcoatScale: number;
+    envMapScale: number;
+    roughnessBias: number;
+    microTransparencyThreshold: number;
+  }
+> = {
+  cinematic: {
+    transmissionScale: 1,
+    iridescenceScale: 1,
+    clearcoatScale: 1,
+    envMapScale: 1,
+    roughnessBias: 0,
+    microTransparencyThreshold: 0,
+  },
+  balanced: {
+    transmissionScale: 0.68,
+    iridescenceScale: 0.56,
+    clearcoatScale: 0.74,
+    envMapScale: 0.88,
+    roughnessBias: 0.05,
+    microTransparencyThreshold: 0.022,
+  },
+  streamlined: {
+    transmissionScale: 0.2,
+    iridescenceScale: 0.01,
+    clearcoatScale: 0.22,
+    envMapScale: 0.58,
+    roughnessBias: 0.14,
+    microTransparencyThreshold: 0.06,
+  },
 };
 
 const HERO_ASSET_PATHS: Record<HeroAssetId, string> = {
@@ -156,6 +221,14 @@ function createCuratedMaterial(
     assetId === "wireframe_globe" ||
     assetId === "hologram" ||
     assetId === "paradox_abstract";
+  material.userData.baseRoughness = material.roughness;
+  material.userData.baseMetalness = material.metalness;
+  material.userData.baseTransmission = material.transmission;
+  material.userData.baseThickness = material.thickness;
+  material.userData.baseIridescence = material.iridescence;
+  material.userData.baseClearcoat = material.clearcoat;
+  material.userData.baseClearcoatRoughness = material.clearcoatRoughness;
+  material.userData.baseEnvMapIntensity = material.envMapIntensity;
 
   return material;
 }
@@ -165,17 +238,32 @@ function prepareHeroScene(
   assetId: HeroAssetId,
   grade: MaterialGradeProfile,
   accent: string
-) {
+) : PreparedHeroScene {
   const materials: CuratedMaterial[] = [];
+  const meshes: CuratedMesh[] = [];
+  const sceneRadius = measureSceneBounds(scene).radius;
 
   scene.traverse((node) => {
-    const mesh = node as THREE.Mesh;
+    const mesh = node as CuratedMesh;
     if (!mesh.isMesh) {
       return;
     }
 
     mesh.castShadow = true;
     mesh.receiveShadow = assetId !== "hologram";
+    mesh.userData.baseCastShadow = mesh.castShadow;
+    mesh.userData.baseReceiveShadow = mesh.receiveShadow;
+
+    if (!mesh.geometry.boundingSphere) {
+      mesh.geometry.computeBoundingSphere();
+    }
+
+    mesh.userData.detailWeight = THREE.MathUtils.clamp(
+      (mesh.geometry.boundingSphere?.radius ?? sceneRadius) /
+        Math.max(sceneRadius, 0.0001),
+      0,
+      1
+    );
 
     const assignMaterial = (source: THREE.Material) => {
       const nextMaterial = createCuratedMaterial(source, assetId, grade, accent);
@@ -183,22 +271,40 @@ function prepareHeroScene(
       return nextMaterial;
     };
 
-    mesh.material = Array.isArray(mesh.material)
+    const assignedMaterials = Array.isArray(mesh.material)
       ? mesh.material.map(assignMaterial)
       : assignMaterial(mesh.material);
+    mesh.material = assignedMaterials;
+    mesh.userData.hasExpensiveTransparency = Array.isArray(assignedMaterials)
+      ? assignedMaterials.some((material) => material.userData.forceTransparent)
+      : assignedMaterials.userData.forceTransparent;
+    meshes.push(mesh);
   });
 
-  return materials;
+  return { materials, meshes };
 }
 
 function updateMaterialState(
   materials: CuratedMaterial[],
   opacity: number,
-  emissiveScale: number
+  emissiveScale: number,
+  lod: DetailLod
 ) {
+  const lodProfile = HERO_LOD_PROFILES[lod];
+
   for (const material of materials) {
     const baseOpacity = material.userData.baseOpacity ?? 1;
     const baseEmissiveIntensity = material.userData.baseEmissiveIntensity ?? 0;
+    const baseRoughness = material.userData.baseRoughness ?? material.roughness;
+    const baseMetalness = material.userData.baseMetalness ?? material.metalness;
+    const baseTransmission = material.userData.baseTransmission ?? material.transmission;
+    const baseThickness = material.userData.baseThickness ?? material.thickness;
+    const baseIridescence = material.userData.baseIridescence ?? material.iridescence;
+    const baseClearcoat = material.userData.baseClearcoat ?? material.clearcoat;
+    const baseClearcoatRoughness =
+      material.userData.baseClearcoatRoughness ?? material.clearcoatRoughness;
+    const baseEnvMapIntensity =
+      material.userData.baseEnvMapIntensity ?? material.envMapIntensity;
     const nearOpaque = opacity > 0.72;
     const resolvedOpacity = nearOpaque
       ? 1
@@ -209,8 +315,42 @@ function updateMaterialState(
       (material.userData.prefersDepthWrite ?? true) &&
       !(material.userData.forceTransparent ?? false) &&
       nearOpaque;
+    material.roughness = THREE.MathUtils.clamp(
+      baseRoughness + lodProfile.roughnessBias,
+      0,
+      1
+    );
+    material.metalness = baseMetalness;
+    material.transmission = baseTransmission * lodProfile.transmissionScale;
+    material.thickness = baseThickness * Math.max(lodProfile.transmissionScale, 0.24);
+    material.iridescence = baseIridescence * lodProfile.iridescenceScale;
+    material.clearcoat = baseClearcoat * lodProfile.clearcoatScale;
+    material.clearcoatRoughness = THREE.MathUtils.clamp(
+      baseClearcoatRoughness + (lod === "streamlined" ? 0.18 : lod === "balanced" ? 0.08 : 0),
+      0,
+      1
+    );
+    material.envMapIntensity = baseEnvMapIntensity * lodProfile.envMapScale;
     material.emissiveIntensity =
       baseEmissiveIntensity * (0.45 + opacity * 0.9) * emissiveScale;
+  }
+}
+
+function updateMeshLod(
+  meshes: CuratedMesh[],
+  lod: DetailLod,
+  enableShadows: boolean
+) {
+  const threshold = HERO_LOD_PROFILES[lod].microTransparencyThreshold;
+
+  for (const mesh of meshes) {
+    const detailWeight = mesh.userData.detailWeight ?? 1;
+    const isExpensiveTransparency = mesh.userData.hasExpensiveTransparency ?? false;
+    mesh.visible = !(isExpensiveTransparency && detailWeight < threshold);
+    mesh.castShadow =
+      enableShadows && lod === "cinematic" && Boolean(mesh.userData.baseCastShadow);
+    mesh.receiveShadow =
+      enableShadows && lod !== "streamlined" && Boolean(mesh.userData.baseReceiveShadow);
   }
 }
 
@@ -235,6 +375,7 @@ function SeedHero({
   weight,
   worldAnchor,
   pointerOffset,
+  runtimeCaps,
 }: HeroSceneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const worldPosRef = useRef(new THREE.Vector3());
@@ -242,7 +383,7 @@ function SeedHero({
   const gltf = useGLTF(HERO_ASSET_PATHS.dark_star);
   const sceneClone = useStableSceneClone(gltf.scene);
   const bounds = useSceneBounds(gltf.scene);
-  const materials = useMemo(
+  const preparedScene = useMemo(
     () =>
       prepareHeroScene(
         sceneClone,
@@ -252,6 +393,7 @@ function SeedHero({
       ),
     [sceneClone, profile]
   );
+  const materials = preparedScene.materials;
   const fittedMaxScale = useHeroScale(profile, bounds.height);
 
   useEffect(() => {
@@ -290,14 +432,26 @@ function SeedHero({
       (visibleHeight * profile.maxModelViewportFill) / Math.max(bounds.height, 0.0001)
     );
     groupRef.current.scale.setScalar(appliedScale);
-    updateMaterialState(materials, visibility, 1 + pointerOffset.length() * 1.4);
+    const fillRatio = computeViewportFillRatio(bounds.height, appliedScale, visibleHeight);
+    const lod = resolveDetailLod({
+      distance,
+      fillRatio,
+      tier: runtimeCaps?.tier ?? "low",
+      prefersReducedMotion: runtimeCaps?.prefersReducedMotion,
+    });
+    updateMeshLod(preparedScene.meshes, lod, Boolean(runtimeCaps?.enableShadows));
+    updateMaterialState(materials, visibility, 1 + pointerOffset.length() * 1.4, lod);
 
     if (reportMetric) {
+      useViewportAuditStore.getState().reportSceneState({ activeHeroLod: lod });
       useViewportAuditStore.getState().reportHeroModel(profile.heroLabel, {
         desiredScale,
         appliedScale,
-        fillRatio: (bounds.height * appliedScale) / visibleHeight,
+        fillRatio,
         maxFill: profile.maxModelViewportFill,
+        lod,
+        distanceToCamera: distance,
+        screenCoverage: fillRatio,
       });
     }
   });
@@ -311,6 +465,7 @@ function ScaffoldHero({
   weight,
   worldAnchor,
   pointerOffset,
+  runtimeCaps,
 }: HeroSceneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const worldPosRef = useRef(new THREE.Vector3());
@@ -318,7 +473,7 @@ function ScaffoldHero({
   const gltf = useGLTF(HERO_ASSET_PATHS.wireframe_globe);
   const sceneClone = useStableSceneClone(gltf.scene);
   const bounds = useSceneBounds(gltf.scene);
-  const materials = useMemo(
+  const preparedScene = useMemo(
     () =>
       prepareHeroScene(
         sceneClone,
@@ -328,6 +483,7 @@ function ScaffoldHero({
       ),
     [sceneClone, profile]
   );
+  const materials = preparedScene.materials;
   const fittedMaxScale = useHeroScale(profile, bounds.height);
 
   useEffect(
@@ -364,14 +520,26 @@ function ScaffoldHero({
       (visibleHeight * profile.maxModelViewportFill) / Math.max(bounds.height, 0.0001)
     );
     groupRef.current.scale.setScalar(appliedScale * (1 + pointerOffset.length() * 0.04));
-    updateMaterialState(materials, visibility, 1 + pointerOffset.length() * 0.9);
+    const fillRatio = computeViewportFillRatio(bounds.height, appliedScale, visibleHeight);
+    const lod = resolveDetailLod({
+      distance,
+      fillRatio,
+      tier: runtimeCaps?.tier ?? "low",
+      prefersReducedMotion: runtimeCaps?.prefersReducedMotion,
+    });
+    updateMeshLod(preparedScene.meshes, lod, Boolean(runtimeCaps?.enableShadows));
+    updateMaterialState(materials, visibility, 1 + pointerOffset.length() * 0.9, lod);
 
     if (reportMetric) {
+      useViewportAuditStore.getState().reportSceneState({ activeHeroLod: lod });
       useViewportAuditStore.getState().reportHeroModel(profile.heroLabel, {
         desiredScale,
         appliedScale,
-        fillRatio: (bounds.height * appliedScale) / visibleHeight,
+        fillRatio,
         maxFill: profile.maxModelViewportFill,
+        lod,
+        distanceToCamera: distance,
+        screenCoverage: fillRatio,
       });
     }
   });
@@ -385,6 +553,7 @@ function CirculationHero({
   weight,
   worldAnchor,
   pointerOffset,
+  runtimeCaps,
 }: HeroSceneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const worldPosRef = useRef(new THREE.Vector3());
@@ -392,7 +561,7 @@ function CirculationHero({
   const gltf = useGLTF(HERO_ASSET_PATHS.hologram);
   const sceneClone = useStableSceneClone(gltf.scene);
   const bounds = useSceneBounds(gltf.scene);
-  const materials = useMemo(
+  const preparedScene = useMemo(
     () =>
       prepareHeroScene(
         sceneClone,
@@ -402,6 +571,7 @@ function CirculationHero({
       ),
     [sceneClone, profile]
   );
+  const materials = preparedScene.materials;
   const fittedMaxScale = useHeroScale(profile, bounds.height);
 
   useEffect(
@@ -438,18 +608,31 @@ function CirculationHero({
       (visibleHeight * profile.maxModelViewportFill) / Math.max(bounds.height, 0.0001)
     );
     groupRef.current.scale.setScalar(appliedScale);
+    const fillRatio = computeViewportFillRatio(bounds.height, appliedScale, visibleHeight);
+    const lod = resolveDetailLod({
+      distance,
+      fillRatio,
+      tier: runtimeCaps?.tier ?? "low",
+      prefersReducedMotion: runtimeCaps?.prefersReducedMotion,
+    });
+    updateMeshLod(preparedScene.meshes, lod, Boolean(runtimeCaps?.enableShadows));
     updateMaterialState(
       materials,
       visibility * 0.94,
-      1.2 + pointerOffset.length() * 1.2
+      1.2 + pointerOffset.length() * 1.2,
+      lod
     );
 
     if (reportMetric) {
+      useViewportAuditStore.getState().reportSceneState({ activeHeroLod: lod });
       useViewportAuditStore.getState().reportHeroModel(profile.heroLabel, {
         desiredScale,
         appliedScale,
-        fillRatio: (bounds.height * appliedScale) / visibleHeight,
+        fillRatio,
         maxFill: profile.maxModelViewportFill,
+        lod,
+        distanceToCamera: distance,
+        screenCoverage: fillRatio,
       });
     }
   });
@@ -463,6 +646,7 @@ function SentienceHero({
   weight,
   worldAnchor,
   pointerOffset,
+  runtimeCaps,
 }: HeroSceneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const bridgeRef = useRef<THREE.Mesh>(null);
@@ -474,7 +658,7 @@ function SentienceHero({
   const primaryClone = useStableSceneClone(gltfPrimary.scene);
   const supportClone = useStableSceneClone(gltfSupport.scene);
   const primaryBounds = useSceneBounds(gltfPrimary.scene);
-  const primaryMaterials = useMemo(
+  const primaryPreparedScene = useMemo(
     () =>
       prepareHeroScene(
         primaryClone,
@@ -484,7 +668,8 @@ function SentienceHero({
       ),
     [primaryClone, profile]
   );
-  const supportMaterials = useMemo(
+  const primaryMaterials = primaryPreparedScene.materials;
+  const supportPreparedScene = useMemo(
     () =>
       prepareHeroScene(
         supportClone,
@@ -494,6 +679,7 @@ function SentienceHero({
       ),
     [profile.materialGrade, supportClone]
   );
+  const supportMaterials = supportPreparedScene.materials;
   const fittedMaxScale = useHeroScale(profile, primaryBounds.height);
 
   useEffect(
@@ -534,9 +720,6 @@ function SentienceHero({
       bridgeMaterial.emissiveIntensity = 0.28 + visibility * 0.56;
     }
 
-    updateMaterialState(primaryMaterials, visibility, 1.1 + pointerOffset.length());
-    updateMaterialState(supportMaterials, visibility * 0.8, 0.85 + pointerOffset.length());
-
     primaryRef.current.getWorldPosition(worldPosRef.current);
     const camera = state.camera as THREE.PerspectiveCamera;
     const distance = worldPosRef.current.distanceTo(camera.position);
@@ -546,14 +729,38 @@ function SentienceHero({
       (visibleHeight * profile.maxModelViewportFill) /
         Math.max(primaryBounds.height, 0.0001)
     );
+    const fillRatio = computeViewportFillRatio(
+      primaryBounds.height,
+      appliedScale,
+      visibleHeight
+    );
+    const lod = resolveDetailLod({
+      distance,
+      fillRatio,
+      tier: runtimeCaps?.tier ?? "low",
+      prefersReducedMotion: runtimeCaps?.prefersReducedMotion,
+    });
+    updateMeshLod(primaryPreparedScene.meshes, lod, Boolean(runtimeCaps?.enableShadows));
+    updateMeshLod(supportPreparedScene.meshes, lod, Boolean(runtimeCaps?.enableShadows));
+    updateMaterialState(primaryMaterials, visibility, 1.1 + pointerOffset.length(), lod);
+    updateMaterialState(
+      supportMaterials,
+      visibility * 0.8,
+      0.85 + pointerOffset.length(),
+      lod
+    );
     primaryRef.current.scale.setScalar(appliedScale);
     supportRef.current.scale.setScalar(appliedScale * 3.4);
     if (reportMetric) {
+      useViewportAuditStore.getState().reportSceneState({ activeHeroLod: lod });
       useViewportAuditStore.getState().reportHeroModel(profile.heroLabel, {
         desiredScale,
         appliedScale,
-        fillRatio: (primaryBounds.height * appliedScale) / visibleHeight,
+        fillRatio,
         maxFill: profile.maxModelViewportFill,
+        lod,
+        distanceToCamera: distance,
+        screenCoverage: fillRatio,
       });
     }
   });
@@ -590,6 +797,7 @@ function ApotheosisHero({
   weight,
   worldAnchor,
   pointerOffset,
+  runtimeCaps,
 }: HeroSceneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const orbitDiskRef = useRef<THREE.Mesh>(null);
@@ -598,7 +806,7 @@ function ApotheosisHero({
   const gltf = useGLTF(HERO_ASSET_PATHS.black_hole);
   const sceneClone = useStableSceneClone(gltf.scene);
   const bounds = useSceneBounds(gltf.scene);
-  const materials = useMemo(
+  const preparedScene = useMemo(
     () =>
       prepareHeroScene(
         sceneClone,
@@ -608,6 +816,7 @@ function ApotheosisHero({
       ),
     [sceneClone, profile]
   );
+  const materials = preparedScene.materials;
   const fittedMaxScale = useHeroScale(profile, bounds.height);
 
   useEffect(() => {
@@ -653,17 +862,30 @@ function ApotheosisHero({
       (visibleHeight * profile.maxModelViewportFill) / Math.max(bounds.height, 0.0001)
     );
     groupRef.current.scale.setScalar(appliedScale);
-    updateMaterialState(materials, visibility, 1.15 + pointerOffset.length() * 0.6);
+    const fillRatio = computeViewportFillRatio(bounds.height, appliedScale, visibleHeight);
+    const lod = resolveDetailLod({
+      distance,
+      fillRatio,
+      tier: runtimeCaps?.tier ?? "low",
+      prefersReducedMotion: runtimeCaps?.prefersReducedMotion,
+    });
+    updateMeshLod(preparedScene.meshes, lod, Boolean(runtimeCaps?.enableShadows));
+    updateMaterialState(materials, visibility, 1.15 + pointerOffset.length() * 0.6, lod);
     if (reportMetric) {
+      useViewportAuditStore.getState().reportSceneState({ activeHeroLod: lod });
       useViewportAuditStore.getState().reportHeroModel(profile.heroLabel, {
         desiredScale,
         appliedScale,
-        fillRatio: (bounds.height * appliedScale) / visibleHeight,
+        fillRatio,
         maxFill: profile.maxModelViewportFill,
+        lod,
+        distanceToCamera: distance,
+        screenCoverage: fillRatio,
       });
       useViewportAuditStore.getState().reportFxLayer("apotheosis-core", {
         opacity: visibility * 0.58,
         scale: 0.78 + visibility * 0.9,
+        lod,
       });
     }
   });
@@ -692,6 +914,8 @@ export function CuratedHeroLayer({
   worldAnchor,
   pointerOffset,
 }: CuratedHeroLayerProps) {
+  const runtimeCaps = useCapsStore((state) => state.caps);
+
   return (
     <>
       <SeedHero
@@ -700,6 +924,7 @@ export function CuratedHeroLayer({
         weight={weights[0] + rebirthBlend}
         worldAnchor={worldAnchor}
         pointerOffset={pointerOffset}
+        runtimeCaps={runtimeCaps}
       />
       <ScaffoldHero
         profile={WORLD_PHASES[1]}
@@ -707,6 +932,7 @@ export function CuratedHeroLayer({
         weight={weights[1]}
         worldAnchor={worldAnchor}
         pointerOffset={pointerOffset}
+        runtimeCaps={runtimeCaps}
       />
       <CirculationHero
         profile={WORLD_PHASES[2]}
@@ -714,6 +940,7 @@ export function CuratedHeroLayer({
         weight={weights[2]}
         worldAnchor={worldAnchor}
         pointerOffset={pointerOffset}
+        runtimeCaps={runtimeCaps}
       />
       <SentienceHero
         profile={WORLD_PHASES[3]}
@@ -721,6 +948,7 @@ export function CuratedHeroLayer({
         weight={weights[3]}
         worldAnchor={worldAnchor}
         pointerOffset={pointerOffset}
+        runtimeCaps={runtimeCaps}
       />
       <ApotheosisHero
         profile={WORLD_PHASES[4]}
@@ -728,6 +956,7 @@ export function CuratedHeroLayer({
         weight={weights[4]}
         worldAnchor={worldAnchor}
         pointerOffset={pointerOffset}
+        runtimeCaps={runtimeCaps}
       />
       <Act6QuantumConsciousness
         progress={weights[5] ?? 0}

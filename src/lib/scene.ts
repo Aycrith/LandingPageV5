@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { CameraPose, Vec3Tuple } from "@/canvas/viewportProfiles";
+import type { Budgets, QualityTier } from "@/stores/capsStore";
 
 export interface SceneBounds {
   box: THREE.Box3;
@@ -11,6 +12,25 @@ export interface SceneBounds {
   width: number;
   depth: number;
   radius: number;
+}
+
+export type DetailLod = "cinematic" | "balanced" | "streamlined";
+
+export interface RenderBudgetSnapshot {
+  estimatedFps: number;
+  pressure: "nominal" | "elevated" | "critical";
+  score: number;
+  within: {
+    frameTime: boolean;
+    drawCalls: boolean;
+    triangles: boolean;
+    geometries: boolean;
+    textures: boolean;
+    programs: boolean;
+    points: boolean;
+    loadTime: boolean;
+  };
+  violations: string[];
 }
 
 export function tupleToVector3(tuple: Vec3Tuple): THREE.Vector3 {
@@ -46,6 +66,50 @@ export function getViewportHeightAtDistance(
   fov: number
 ): number {
   return 2 * Math.tan(THREE.MathUtils.degToRad(fov) * 0.5) * distance;
+}
+
+export function computeViewportFillRatio(
+  rawHeight: number,
+  appliedScale: number,
+  visibleHeight: number
+): number {
+  return (rawHeight * appliedScale) / Math.max(visibleHeight, 0.0001);
+}
+
+export function resolveDetailLod({
+  distance,
+  fillRatio,
+  tier,
+  prefersReducedMotion = false,
+}: {
+  distance: number;
+  fillRatio: number;
+  tier: QualityTier;
+  prefersReducedMotion?: boolean;
+}): DetailLod {
+  if (prefersReducedMotion || tier === "low") {
+    return "streamlined";
+  }
+
+  const coverageSignal = THREE.MathUtils.clamp(fillRatio * 2.4, 0, 1.4);
+  const distanceSignal = THREE.MathUtils.clamp(1 - distance / 10, 0, 1);
+  const emphasis = coverageSignal * 0.72 + distanceSignal * 0.58;
+
+  if (tier === "high") {
+    if (emphasis >= 0.9 || fillRatio >= 0.32) {
+      return "cinematic";
+    }
+    if (emphasis >= 0.42 || fillRatio >= 0.16) {
+      return "balanced";
+    }
+    return "streamlined";
+  }
+
+  if (emphasis >= 0.58 || fillRatio >= 0.22) {
+    return "balanced";
+  }
+
+  return "streamlined";
 }
 
 function getPoseDistance(pose: CameraPose): number {
@@ -92,4 +156,56 @@ export function fitScaleToViewportFill({
   });
 
   return Math.min(desiredScale, previewMaxScale, settleMaxScale);
+}
+
+export function evaluateRenderBudget({
+  budgets,
+  meanDeltaMs,
+  renderer,
+  startupTimeMs,
+}: {
+  budgets: Budgets;
+  meanDeltaMs: number;
+  renderer: {
+    calls: number;
+    triangles: number;
+    points: number;
+    geometries: number;
+    textures: number;
+    programs: number;
+  };
+  startupTimeMs: number | null;
+}): RenderBudgetSnapshot {
+  const estimatedFps = meanDeltaMs > 0 ? 1000 / meanDeltaMs : budgets.fps;
+  const within = {
+    frameTime: meanDeltaMs <= budgets.frameTimeMs,
+    drawCalls: renderer.calls <= budgets.drawCalls,
+    triangles: renderer.triangles <= budgets.triangles,
+    geometries: renderer.geometries <= budgets.geometries,
+    textures: renderer.textures <= budgets.textures,
+    programs: renderer.programs <= budgets.programs,
+    points: renderer.points <= budgets.points,
+    loadTime: startupTimeMs == null || startupTimeMs <= budgets.loadTimeMs,
+  };
+
+  const violations = Object.entries(within)
+    .filter(([, isWithin]) => !isWithin)
+    .map(([metric]) => metric);
+  const score = Math.round(
+    (Object.values(within).filter(Boolean).length / Object.values(within).length) *
+      100
+  );
+
+  return {
+    estimatedFps,
+    pressure:
+      violations.length === 0
+        ? "nominal"
+        : violations.length <= 2
+          ? "elevated"
+          : "critical",
+    score,
+    within,
+    violations,
+  };
 }

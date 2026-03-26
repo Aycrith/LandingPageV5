@@ -5,11 +5,32 @@ interface HeroModelMetric {
   desiredScale: number;
   fillRatio: number;
   maxFill: number;
+  lod?: string;
+  distanceToCamera?: number;
+  screenCoverage?: number;
 }
 
 interface FxLayerMetric {
   opacity?: number;
   scale?: number;
+  lod?: string;
+}
+
+interface BudgetHealthMetric {
+  estimatedFps: number;
+  pressure: "nominal" | "elevated" | "critical";
+  score: number;
+  within: {
+    frameTime: boolean;
+    drawCalls: boolean;
+    triangles: boolean;
+    geometries: boolean;
+    textures: boolean;
+    programs: boolean;
+    points: boolean;
+    loadTime: boolean;
+  };
+  violations: string[];
 }
 
 interface RenderPipelineMetric {
@@ -33,6 +54,7 @@ interface RenderPipelineMetric {
     textures: number;
     programs: number;
   };
+  budget: BudgetHealthMetric;
 }
 
 interface TelemetryMetric {
@@ -48,6 +70,8 @@ interface SceneStateMetric {
   activeHeroAsset: string | null;
   overlayMode: string | null;
   ambientParticleMode: string | null;
+  activeHeroLod: string | null;
+  activeWorldLod: string | null;
 }
 
 interface CompositionMetric {
@@ -56,12 +80,29 @@ interface CompositionMetric {
   additiveMeshCount: number;
   linesCount: number;
   pointsCount: number;
+  physicalMaterialCount: number;
+  transmissionMaterialCount: number;
+  iridescentMaterialCount: number;
+  shadowCasterCount: number;
+}
+
+interface LightingPipelineMetric {
+  exposure: number;
+  environmentMode: string;
+  shadowMapSize: number;
+  ambientIntensity: number;
+  hemisphereIntensity: number;
+  keyIntensity: number;
+  fillIntensity: number;
+  rimIntensity: number;
+  practicalIntensity: number;
 }
 
 interface ViewportAuditState {
   heroModels: Record<string, HeroModelMetric>;
   fxLayers: Record<string, FxLayerMetric>;
   renderPipeline: RenderPipelineMetric | null;
+  lightingPipeline: LightingPipelineMetric | null;
   telemetry: TelemetryMetric;
   sceneState: SceneStateMetric;
   composition: CompositionMetric;
@@ -73,6 +114,7 @@ interface ViewportAuditState {
   clearFxLayer: (label: string) => void;
   pruneFxLayers: (labels: string[]) => void;
   reportRenderPipeline: (metric: RenderPipelineMetric) => void;
+  reportLightingPipeline: (metric: LightingPipelineMetric) => void;
   reportTelemetry: (metric: Partial<TelemetryMetric>) => void;
   reportSceneState: (metric: Partial<SceneStateMetric>) => void;
   reportComposition: (metric: CompositionMetric) => void;
@@ -91,6 +133,8 @@ const INITIAL_SCENE_STATE: SceneStateMetric = {
   activeHeroAsset: null,
   overlayMode: null,
   ambientParticleMode: null,
+  activeHeroLod: null,
+  activeWorldLod: null,
 };
 
 const INITIAL_COMPOSITION: CompositionMetric = {
@@ -99,12 +143,17 @@ const INITIAL_COMPOSITION: CompositionMetric = {
   additiveMeshCount: 0,
   linesCount: 0,
   pointsCount: 0,
+  physicalMaterialCount: 0,
+  transmissionMaterialCount: 0,
+  iridescentMaterialCount: 0,
+  shadowCasterCount: 0,
 };
 
 export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
   heroModels: {},
   fxLayers: {},
   renderPipeline: null,
+  lightingPipeline: null,
   telemetry: INITIAL_TELEMETRY,
   sceneState: INITIAL_SCENE_STATE,
   composition: INITIAL_COMPOSITION,
@@ -113,6 +162,7 @@ export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
       heroModels: {},
       fxLayers: {},
       renderPipeline: null,
+      lightingPipeline: null,
       telemetry: INITIAL_TELEMETRY,
       sceneState: INITIAL_SCENE_STATE,
       composition: INITIAL_COMPOSITION,
@@ -170,6 +220,10 @@ export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
   reportRenderPipeline: (metric) =>
     set({
       renderPipeline: metric,
+    }),
+  reportLightingPipeline: (metric) =>
+    set({
+      lightingPipeline: metric,
     }),
   reportTelemetry: (metric) =>
     set((state) => ({
