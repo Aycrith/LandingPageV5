@@ -1,14 +1,16 @@
 "use client";
 
-import { Suspense, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { type QualityTier } from "@/stores/capsStore";
 import { useCursorStore } from "@/stores/cursorStore";
 import { useRepeatingTexture } from "@/lib/textures";
+import { seededUnit } from "@/lib/random";
 import { CuratedHeroLayer } from "./CuratedHeroLayer";
 import { VolumetricUI } from "./VolumetricUI";
 import { WORLD_PHASES } from "./viewportProfiles";
+import { VoidParticleField } from "./particles/VoidParticleField";
 
 interface SeamlessWorldProps {
   activeAct: number;
@@ -78,9 +80,11 @@ export function SeamlessWorld({
 
   const weights = useMemo(() => {
     const currentWeight =
-      1 - THREE.MathUtils.smootherstep(phaseBlend, 0.16, 0.82);
-    const nextWeight = THREE.MathUtils.smootherstep(phaseBlend, 0.52, 0.96);
-    const list = Array.from({ length: WORLD_PHASES.length }, () => 0);
+      1 - THREE.MathUtils.smootherstep(phaseBlend, 0.08, 0.86);
+    const nextWeight = THREE.MathUtils.smootherstep(phaseBlend, 0.46, 0.98);
+    // Ensure the array always has at least 6 slots for Act 6 support
+    const len = Math.max(WORLD_PHASES.length, 6);
+    const list = Array.from({ length: len }, () => 0);
     list[activeAct] = currentWeight;
     list[nextAct] = nextWeight;
     return list;
@@ -111,11 +115,16 @@ export function SeamlessWorld({
   const pointerOffset = useMemo(() => new THREE.Vector3(), []);
   const fogColor = useMemo(() => new THREE.Color(), []);
   const fogSecondary = useMemo(() => new THREE.Color(), []);
+  const sporeColorLerp = useMemo(() => new THREE.Color(), []);
+  const sporeColorNext = useMemo(() => new THREE.Color(), []);
   const baseSporePositionsRef = useRef<Float32Array | null>(null);
   const noiseTexture = useRepeatingTexture(
     "/textures/volumetric/nebula-noise-1k-seamless.png",
     { repeat: 2.6 }
   );
+  // Ref for per-frame offset mutation — avoids modifying hook return value directly.
+  const noiseTextureRef = useRef(noiseTexture);
+  useEffect(() => { noiseTextureRef.current = noiseTexture; }, [noiseTexture]);
 
   const scaffoldRibs = useMemo(
     () =>
@@ -156,21 +165,25 @@ export function SeamlessWorld({
     []
   );
   const sporeCount = tier === "high" ? 280 : tier === "medium" ? 160 : 72;
-  const sporeGeometry = useMemo(() => {
+  const sporeBasePositions = useMemo(() => {
     const positions = new Float32Array(sporeCount * 3);
     for (let i = 0; i < sporeCount; i++) {
-      const radius = 5.2 + (i % 9) * 0.42 + Math.random() * 1.8;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
+      const radius = 5.2 + (i % 9) * 0.42 + seededUnit(i * 7) * 1.8;
+      const theta = seededUnit(i * 13) * Math.PI * 2;
+      const phi = Math.acos(2 * seededUnit(i * 17) - 1);
       positions[i * 3] = Math.cos(theta) * Math.sin(phi) * radius;
       positions[i * 3 + 1] = Math.cos(phi) * radius * 0.52;
       positions[i * 3 + 2] = Math.sin(theta) * Math.sin(phi) * radius * 1.2;
     }
-    baseSporePositionsRef.current = positions.slice();
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    return geometry;
+    return positions;
   }, [sporeCount]);
+  // Sync base positions to ref outside of useMemo to avoid ref mutation during render.
+  useEffect(() => { baseSporePositionsRef.current = sporeBasePositions; }, [sporeBasePositions]);
+  const sporeGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(sporeBasePositions.slice(), 3));
+    return geometry;
+  }, [sporeBasePositions]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -211,15 +224,20 @@ export function SeamlessWorld({
       0
     );
 
+    const cursorCenterDist = Math.sqrt(
+      Math.pow(cursor.x - 0.5, 2) + Math.pow(cursor.y - 0.5, 2)
+    );
+    const cursorProximity = Math.max(0, 1 - cursorCenterDist * 4);
+
     if (chamberRef.current) {
       chamberRef.current.rotation.y = t * 0.01;
     }
 
     if (auraRef.current) {
       auraRef.current.position.copy(worldAnchor);
-      auraRef.current.scale.setScalar(0.86 + seedWeight * 0.14 + apotheosisWeight * 0.18);
+      auraRef.current.scale.setScalar(0.86 + seedWeight * 0.14 + apotheosisWeight * 0.18 + Math.sin(t * 0.88) * 0.012);
       const auraMaterial = auraRef.current.material as THREE.MeshBasicMaterial;
-      auraMaterial.opacity = 0.03 + seedWeight * 0.03 + apotheosisWeight * 0.05;
+      auraMaterial.opacity = 0.03 + seedWeight * 0.03 + apotheosisWeight * 0.05 + cursorProximity * 0.04;
     }
 
     fogColor
@@ -288,12 +306,13 @@ export function SeamlessWorld({
       scaffoldGroupRef.current.position.copy(worldAnchor);
       scaffoldGroupRef.current.visible = scaffoldWeight > 0.02;
       scaffoldGroupRef.current.rotation.y = t * 0.08;
-      scaffoldGroupRef.current.children.forEach((child) => {
+      scaffoldGroupRef.current.scale.setScalar(1 + Math.sin(t * 0.62) * 0.006);
+      scaffoldGroupRef.current.children.forEach((child, index) => {
         const mesh = child as THREE.Mesh;
         if (!("material" in mesh)) return;
         const material = mesh.material as THREE.MeshPhysicalMaterial;
         material.opacity = scaffoldWeight * 0.22;
-        material.emissiveIntensity = 0.06 + scaffoldWeight * 0.22;
+        material.emissiveIntensity = 0.08 + scaffoldWeight * (0.10 + Math.sin(t * 1.4 + index * 1.1) * 0.18) + cursorProximity * 0.12;
       });
     }
 
@@ -310,9 +329,9 @@ export function SeamlessWorld({
         scaffoldNodesRef.current.setMatrixAt(i, dummy.matrix);
       }
       scaffoldNodesRef.current.instanceMatrix.needsUpdate = true;
-      const material = scaffoldNodesRef.current.material as THREE.MeshStandardMaterial;
-      material.opacity = scaffoldWeight * 0.54;
-      material.emissiveIntensity = 0.12 + scaffoldWeight * 0.3;
+      const material = scaffoldNodesRef.current.material as THREE.MeshPhysicalMaterial;
+      material.opacity = scaffoldWeight * 0.32; // capped to support hero, not compete
+      material.emissiveIntensity = 0.08 + scaffoldWeight * (0.22 + Math.sin(t * 1.8) * 0.14);
     }
 
     if (circulationGroupRef.current) {
@@ -323,7 +342,7 @@ export function SeamlessWorld({
         const mesh = child as THREE.Mesh;
         const material = mesh.material as THREE.MeshPhysicalMaterial;
         material.opacity = circulationWeight * (0.18 + index * 0.02);
-        material.emissiveIntensity = 0.1 + circulationWeight * 0.52 + index * 0.03;
+        material.emissiveIntensity = 0.1 + circulationWeight * (0.38 + Math.sin(t * 1.6 + index * 0.7) * 0.18) + index * 0.03;
       });
     }
 
@@ -334,7 +353,7 @@ export function SeamlessWorld({
       const material =
         sentienceBridgeRef.current.material as THREE.MeshPhysicalMaterial;
       material.opacity = sentienceWeight * 0.34;
-      material.emissiveIntensity = 0.14 + sentienceWeight * 0.52;
+      material.emissiveIntensity = 0.14 + sentienceWeight * (0.38 + Math.sin(t * 2.1) * 0.16);
     }
 
     if (apotheosisGroupRef.current) {
@@ -383,7 +402,7 @@ export function SeamlessWorld({
       for (let i = 0; i < sporeCount; i++) {
         const ix = i * 3;
         const flow = Math.sin(t * (0.16 + metabolism * 0.2) + i * 0.23);
-        positions[ix] = base[ix] + flow * 0.08 + (cursor.x - 0.5) * 0.12;
+        positions[ix] = base[ix] + flow * 0.08 + (cursor.x - 0.5) * 0.22;
         positions[ix + 1] =
           base[ix + 1] + Math.cos(t * 0.2 + i * 0.19) * 0.08;
         positions[ix + 2] =
@@ -395,6 +414,9 @@ export function SeamlessWorld({
         currentProfile.ambientParticleMode === "none" && nextProfile.ambientParticleMode === "none"
           ? 0
           : 0.06 + currentWeight * 0.05;
+      sporeColorNext.set(nextProfile.accent);
+      sporeColorLerp.set(currentProfile.accent).lerp(sporeColorNext, phaseBlend);
+      material.color.copy(sporeColorLerp);
     }
 
     if (shadowPlaneRef.current) {
@@ -428,13 +450,16 @@ export function SeamlessWorld({
         : 0;
     }
 
-    noiseTexture.offset.x +=
-      THREE.MathUtils.lerp(
-        currentProfile.fogProfile.drift,
-        nextProfile.fogProfile.drift,
-        phaseBlend
-      ) * 0.0009;
-    noiseTexture.offset.y += 0.00025;
+    const noiseTex = noiseTextureRef.current;
+    if (noiseTex) {
+      noiseTex.offset.x +=
+        THREE.MathUtils.lerp(
+          currentProfile.fogProfile.drift,
+          nextProfile.fogProfile.drift,
+          phaseBlend
+        ) * 0.0009;
+      noiseTex.offset.y += 0.00025;
+    }
   });
 
   return (
@@ -553,27 +578,33 @@ export function SeamlessWorld({
             <meshPhysicalMaterial
               color="#90d7ff"
               emissive="#b9ebff"
-              emissiveIntensity={0.16}
+              emissiveIntensity={0.1}
               transparent
               opacity={0.16}
-              transmission={0.78}
-              thickness={0.55}
-              metalness={0.08}
-              roughness={0.12}
+              transmission={0.92}
+              thickness={1.2}
+              metalness={0.04}
+              roughness={0.06}
+              iridescence={0.44}
+              iridescenceIOR={1.6}
               depthWrite={false}
             />
           </mesh>
         ))}
         <instancedMesh ref={scaffoldNodesRef} args={[undefined, undefined, scaffoldNodes.length]}>
           <sphereGeometry args={[1, 10, 10]} />
-          <meshStandardMaterial
+          <meshPhysicalMaterial
             color="#dff6ff"
             emissive="#8dcfff"
             emissiveIntensity={0.2}
             transparent
             opacity={0.32}
-            metalness={0.76}
-            roughness={0.18}
+            transmission={0.6}
+            thickness={0.8}
+            metalness={0.32}
+            roughness={0.08}
+            iridescence={0.28}
+            iridescenceIOR={1.4}
           />
         </instancedMesh>
       </group>
@@ -644,6 +675,8 @@ export function SeamlessWorld({
           />
         </instancedMesh>
       </group>
+
+      <VoidParticleField />
 
       <Suspense fallback={null}>
         <CuratedHeroLayer

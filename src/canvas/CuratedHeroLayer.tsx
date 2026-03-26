@@ -18,6 +18,7 @@ import {
   type MaterialGradeProfile,
   type WorldPhaseProfile,
 } from "./viewportProfiles";
+import { Act6QuantumConsciousness } from "./acts/Act6QuantumConsciousness";
 
 interface CuratedHeroLayerProps {
   activeMetricIndex: number;
@@ -97,11 +98,13 @@ function createCuratedMaterial(
       material.emissive.set(grade.shellEmissive);
       material.emissiveIntensity = 0.46 * grade.emissiveBoost;
       material.roughness = 0.1;
-      material.metalness = 0.14;
+      material.metalness = 0.06;
       material.transmission = 0.82;
       material.thickness = 0.64;
       material.ior = 1.08;
-      material.iridescence = 0.34;
+      material.iridescence = 0.56;
+      material.iridescenceIOR = 1.8;
+      (material as unknown as Record<string, unknown>).iridescenceThicknessRange = [80, 400];
       break;
     case "hologram":
       material.color.set("#8fcfff");
@@ -360,7 +363,7 @@ function ScaffoldHero({
       desiredScale,
       (visibleHeight * profile.maxModelViewportFill) / Math.max(bounds.height, 0.0001)
     );
-    groupRef.current.scale.setScalar(appliedScale);
+    groupRef.current.scale.setScalar(appliedScale * (1 + pointerOffset.length() * 0.04));
     updateMaterialState(materials, visibility, 1 + pointerOffset.length() * 0.9);
 
     if (reportMetric) {
@@ -725,6 +728,10 @@ export function CuratedHeroLayer({
         weight={weights[4]}
         worldAnchor={worldAnchor}
         pointerOffset={pointerOffset}
+      />
+      <Act6QuantumConsciousness
+        progress={weights[5] ?? 0}
+        visible={(weights[5] ?? 0) > 0.01}
       />
     </>
   );

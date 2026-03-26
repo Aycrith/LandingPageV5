@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-const NUM_ACTS = 5;
+const NUM_ACTS = 6;
 
 interface ScrollState {
   /** Global scroll progress 0-1 */

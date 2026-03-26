@@ -10,6 +10,7 @@ import { useScrollStore } from "@/stores/scrollStore";
 import { cn } from "@/lib/utils";
 import { TextReveal } from "./TextReveal";
 import { MagneticButton } from "./MagneticButton";
+import { QuantumCollapseText } from "./ui/QuantumCollapseText";
 
 interface ActContentProps {
   profile: ActViewportProfile;
@@ -163,7 +164,13 @@ export function ActContent({ profile }: ActContentProps) {
                 )}
                 style={{ fontFamily: "var(--font-heading), sans-serif" }}
               >
-                <TextReveal text={profile.copy.title} trigger={isActive} stagger={34} />
+                {profile.slug === "quantum" ? (
+                  <QuantumCollapseText as="span" delay={120}>
+                    {profile.copy.title}
+                  </QuantumCollapseText>
+                ) : (
+                  <TextReveal text={profile.copy.title} trigger={isActive} stagger={34} />
+                )}
               </h2>
               <p className="mt-4 text-sm uppercase tracking-[0.16em] text-white/55 md:text-base">
                 {profile.copy.subtitle}

@@ -64,20 +64,21 @@ export function CameraRig() {
   );
 
   useEffect(() => {
-    if (camera instanceof THREE.PerspectiveCamera) {
-      cameraRef.current = camera;
-      camera.position.copy(startupPreview.position);
-      camera.lookAt(startupPreview.lookAt);
-      camera.fov = startupPreview.fov;
-      camera.updateProjectionMatrix();
-    }
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    cameraRef.current = camera;
+    // Mutate via the ref-derived local — avoids modifying hook return value directly.
+    const cam = cameraRef.current;
+    cam.position.copy(startupPreview.position);
+    cam.lookAt(startupPreview.lookAt);
+    cam.fov = startupPreview.fov;
+    cam.updateProjectionMatrix();
   }, [camera, startupPreview]);
 
   useFrame((state, delta) => {
     const perspCam = cameraRef.current;
     if (!perspCam) return;
 
-    const { progress } = useScrollStore.getState();
+    const { progress, velocity } = useScrollStore.getState();
     const startupState = useSceneLoadStore.getState();
     let targetFov = startupSettle.fov;
     let allowParallax = startupSequenceComplete.current;
@@ -122,7 +123,9 @@ export function CameraRig() {
     } else {
       const normalized = THREE.MathUtils.euclideanModulo(progress, 1);
       positionCurve.getPointAt(normalized, targetPos.current);
-      lookAtCurve.getPointAt(normalized, targetLookAt.current);
+      lookAtCurve.getPointAt((normalized + 0.015) % 1, targetLookAt.current);
+      targetPos.current.x += Math.sin(state.clock.elapsedTime * 0.7 + 1.2) * 0.004;
+      targetPos.current.y += Math.cos(state.clock.elapsedTime * 0.5) * 0.004;
 
       const exactIndex = normalized * WORLD_PHASES.length;
       const leftIndex = Math.floor(exactIndex) % WORLD_PHASES.length;
@@ -133,8 +136,8 @@ export function CameraRig() {
     }
 
     if (allowParallax) {
-      targetPos.current.x += mouse.current.x * 0.08;
-      targetPos.current.y += mouse.current.y * 0.05;
+      targetPos.current.x += mouse.current.x * 0.12;
+      targetPos.current.y += mouse.current.y * 0.08;
       targetLookAt.current.x += mouse.current.x * 0.03;
       targetLookAt.current.y += mouse.current.y * 0.02;
     }
@@ -147,6 +150,11 @@ export function CameraRig() {
 
     perspCam.position.copy(currentPos.current);
     perspCam.lookAt(currentLookAt.current);
+    perspCam.rotation.z = THREE.MathUtils.lerp(
+      perspCam.rotation.z,
+      velocity * -0.04,
+      lerpSpeed
+    );
     perspCam.fov = THREE.MathUtils.lerp(perspCam.fov, targetFov, lerpSpeed);
     perspCam.updateProjectionMatrix();
   });

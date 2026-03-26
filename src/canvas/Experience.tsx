@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
 import { ACESFilmicToneMapping } from "three";
+import { Stats, OrbitControls } from "@react-three/drei";
 import { SceneManager } from "./SceneManager";
 import { CameraRig } from "./camera/CameraRig";
 import { PostProcessingStack } from "./postfx/PostProcessingStack";
@@ -62,6 +63,13 @@ export default function Experience() {
     return () => clearTimeout(timer);
   }, [startupReady, startupStartedAt]);
 
+  const debugMode = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("debug") === "1",
+    []
+  );
+
   if (!caps) return null;
 
   return (
@@ -99,6 +107,12 @@ export default function Experience() {
           <>
             <SceneManager />
             <PostProcessingStack />
+          </>
+        )}
+        {debugMode && (
+          <>
+            <Stats />
+            <OrbitControls makeDefault={false} />
           </>
         )}
       </Canvas>

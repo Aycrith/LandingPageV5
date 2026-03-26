@@ -22,6 +22,12 @@ type RenderableObject = THREE.Object3D & {
 
 type InspectableMaterial = THREE.Material & {
   wireframe?: boolean;
+  roughness?: number;
+  metalness?: number;
+  emissiveIntensity?: number;
+  transmission?: number;
+  iridescence?: number;
+  map?: THREE.Texture | null;
 };
 
 interface RendererSnapshot {
@@ -138,6 +144,13 @@ function collectMeshSnapshot(scene: THREE.Scene) {
         wireframe: material.wireframe,
         side: material.side,
         visible: material.visible,
+        // PBR surface properties — needed for drift analysis vs source GLBs
+        roughness: material.roughness,
+        metalness: material.metalness,
+        emissiveIntensity: material.emissiveIntensity,
+        transmission: material.transmission,
+        iridescence: material.iridescence,
+        mapUrl: (material.map?.source?.data as HTMLImageElement | null)?.src ?? null,
       };
     };
 
@@ -154,6 +167,8 @@ function collectMeshSnapshot(scene: THREE.Scene) {
       visible: child.visible,
       renderOrder: child.renderOrder,
       position: child.getWorldPosition(new THREE.Vector3()).toArray(),
+      scale: child.scale.toArray(),
+      rotation: [child.rotation.x, child.rotation.y, child.rotation.z],
       materials: materialsInfo,
       boundingBox: bboxData,
       frustumCulled: child.frustumCulled,
@@ -296,6 +311,20 @@ export function ViewportAuditProbe() {
 
     const telemetryWindow = window as Window & {
       __R3F_TELEMETRY?: () => unknown;
+      __LPV5_DEBUG__?: {
+        getScene: () => THREE.Scene;
+        listMaterials: () => Array<{ name: string; position: number[]; materials: unknown[] }>;
+      };
+    };
+
+    telemetryWindow.__LPV5_DEBUG__ = {
+      getScene: () => scene,
+      listMaterials: () =>
+        collectMeshSnapshot(scene).meshes.map((m) => ({
+          name: m.name as string,
+          position: m.position as number[],
+          materials: m.materials as unknown[],
+        })),
     };
 
     telemetryWindow.__R3F_TELEMETRY = () => {
@@ -318,6 +347,7 @@ export function ViewportAuditProbe() {
 
     return () => {
       delete telemetryWindow.__R3F_TELEMETRY;
+      delete telemetryWindow.__LPV5_DEBUG__;
     };
   }, [scene]);
 
