@@ -43,6 +43,18 @@ If drift is detected → STOP, re-read plan, refocus.
 
 ---
 
+## Completion Protocol (MANDATORY)
+
+Before ending any task:
+
+- [ ] Ensure all checklist items are marked complete, blocked, or skipped with a reason.
+- [ ] Send a brief final summary to the user.
+- [ ] Trigger the completion signal/tool immediately after the summary.
+
+Do not end a session after only a narrative response when a completion signal is required.
+
+---
+
 ## DRIFT DETECTION & RECOVERY
 
 🚨 **DRIFT SIGNALS:**
