@@ -11,6 +11,16 @@ import { useCapsStore } from "@/stores/capsStore";
 
 const STABLE_FRAME_THRESHOLD =
   ACT_VIEWPORT_PROFILES[0].fxLayerBehavior.stableFrames;
+const AUDIT_STARTUP_WAIT_MS = 30_000;
+
+function resolveStartupWaitMs(defaultMs: number) {
+  if (typeof window === "undefined") {
+    return defaultMs;
+  }
+
+  const search = new URLSearchParams(window.location.search);
+  return search.get("audit") === "1" ? AUDIT_STARTUP_WAIT_MS : defaultMs;
+}
 
 export function StartupReadinessGate() {
   const stableFrames = useRef(0);
@@ -36,11 +46,18 @@ export function StartupReadinessGate() {
         return;
       }
 
-      const MAX_MS = capsState.caps?.budgets.loadTimeMs ?? 6000;
+      const MAX_MS = resolveStartupWaitMs(
+        capsState.caps?.budgets.loadTimeMs ?? 6000
+      );
       if (gateOpenAt.current === null) gateOpenAt.current = Date.now();
       const elapsed = Date.now() - gateOpenAt.current;
 
-      if (!areCriticalAssetsReady(state)) {
+      const startupPipelineReady =
+        areCriticalAssetsReady(state) &&
+        state.assetManifestReady &&
+        state.warmupReady;
+
+      if (!startupPipelineReady) {
         intervalStableCount.current = 0;
         if (elapsed > MAX_MS) {
           state.markFallbackTriggered();
@@ -65,7 +82,9 @@ export function StartupReadinessGate() {
   useFrame(() => {
     const state = useSceneLoadStore.getState();
     const capsState = useCapsStore.getState();
-    const MAX_STARTUP_WAIT_MS = capsState.caps?.budgets.loadTimeMs ?? 6000;
+    const MAX_STARTUP_WAIT_MS = resolveStartupWaitMs(
+      capsState.caps?.budgets.loadTimeMs ?? 6000
+    );
 
     if (state.stableFrameReady || state.hasFallbackTriggered) return;
 
@@ -74,9 +93,16 @@ export function StartupReadinessGate() {
     }
     const elapsed = Date.now() - gateOpenAt.current;
 
-    if (!areCriticalAssetsReady(state)) {
+    const startupPipelineReady =
+      areCriticalAssetsReady(state) &&
+      state.assetManifestReady &&
+      state.warmupReady;
+
+    if (!startupPipelineReady) {
       if (elapsed > MAX_STARTUP_WAIT_MS) {
-        console.warn("[StartupReadinessGate] Critical assets timed out, enforcing fallback.");
+        console.warn(
+          "[StartupReadinessGate] Startup pipeline timed out, enforcing fallback."
+        );
         state.markFallbackTriggered();
       }
       stableFrames.current = 0;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo } from "react";
+import { useRef } from "react";
 import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
 import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
@@ -73,15 +73,15 @@ export function ShaderLinesField({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
 
-  if (!enabled) {
-    return null;
-  }
-
   useFrame((state) => {
-    if (!matRef.current) return;
+    if (!enabled || !matRef.current) return;
     matRef.current.uTime = state.clock.elapsedTime;
     matRef.current.uIntensity = Math.min(progress / 0.5, 1);
   });
+
+  if (!enabled) {
+    return null;
+  }
 
   return (
     <mesh position={[0, 0, -5]}>

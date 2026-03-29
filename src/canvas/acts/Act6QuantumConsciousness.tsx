@@ -22,6 +22,7 @@ function MicrotubuleLattice({
 }) {
   const tierConfig = useActMaterialTierConfig(5);
   const sphereCount = tierConfig.mesh.latticeCount;
+  const sphereSegments = Math.max(4, tierConfig.mesh.primaryDetail);
 
   const instancedRef = useRef<THREE.InstancedMesh>(null);
   const latticeMaterialRef = useRef<THREE.MeshPhysicalMaterial>(null);
@@ -92,7 +93,7 @@ function MicrotubuleLattice({
   return (
     <>
       <instancedMesh ref={instancedRef} args={[undefined, undefined, latticeData.length]}>
-        <sphereGeometry args={[1, 8, 8]} />
+        <sphereGeometry args={[1, sphereSegments, sphereSegments]} />
         <meshPhysicalMaterial
           ref={latticeMaterialRef}
           color="#001122"
@@ -325,6 +326,7 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
 function TubulinParticles({ progress, active }: { progress: number; active: boolean }) {
   const tierConfig = useActMaterialTierConfig(5);
   const count = tierConfig.mesh.tubulinCount;
+  const sphereSegments = Math.max(4, tierConfig.mesh.secondaryDetail);
 
   const instancedRef = useRef<THREE.InstancedMesh>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
@@ -371,7 +373,7 @@ function TubulinParticles({ progress, active }: { progress: number; active: bool
 
   return (
     <instancedMesh ref={instancedRef} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[1, 6, 6]} />
+      <sphereGeometry args={[1, sphereSegments, sphereSegments]} />
       <meshBasicMaterial
         ref={matRef}
         color="#ffffff"

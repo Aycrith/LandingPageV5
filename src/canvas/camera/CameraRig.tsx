@@ -142,8 +142,8 @@ export function CameraRig() {
       targetLookAt.current.y += mouse.current.y * 0.02;
     }
 
-    const lerpBase = startupSequenceComplete.current ? 0.003 : 0.0006;
-    const lerpSpeed = 1 - Math.pow(lerpBase, delta);
+    const lerpSpeed =
+      1 - Math.pow(startupSequenceComplete.current ? 0.003 : 0.0006, delta);
 
     currentPos.current.lerp(targetPos.current, lerpSpeed);
     currentLookAt.current.lerp(targetLookAt.current, lerpSpeed);

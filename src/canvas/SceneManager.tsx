@@ -5,9 +5,11 @@ import { Environment } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useCapsStore, type QualityTier } from "@/stores/capsStore";
+import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useScrollStore } from "@/stores/scrollStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { SeamlessWorld } from "./SeamlessWorld";
+import { resolveMountedActs } from "./runtimeMounting";
 import { WORLD_PHASES, type AmbientParticleMode, type WorldPhaseProfile } from "./viewportProfiles";
 import { tupleToVector3 } from "@/lib/scene";
 import { computeCrossfadeBlend } from "@/lib/transition";
@@ -37,10 +39,15 @@ export function SceneManager() {
   const activeAct = useScrollStore((state) => state.activeAct);
   const actProgress = useScrollStore((state) => state.actProgress);
   const caps = useCapsStore((state) => state.caps);
+  const warmupActIndex = useSceneLoadStore((state) => state.warmupActIndex);
+  const warmupReady = useSceneLoadStore((state) => state.warmupReady);
   const tier = caps?.tier ?? "low";
-  const currentProfile = WORLD_PHASES[activeAct];
+  const isWarmupMount = false;
+  const resolvedActiveAct = activeAct;
+  const currentProfile = WORLD_PHASES[resolvedActiveAct];
   const nextAct = nextPhaseIndex(activeAct);
   const nextProfile = WORLD_PHASES[nextAct];
+  const effectiveActProgress = actProgress;
   const rebirthBlend =
     activeAct === WORLD_PHASES.length - 1
       ? THREE.MathUtils.smoothstep(
@@ -54,8 +61,15 @@ export function SceneManager() {
   const activeHeroAsset =
     rebirthBlend > 0.45 ? nextProfile.heroAsset : currentProfile.heroAsset;
   const mountedActs = useMemo(
-    () => Array.from(new Set([activeAct, nextAct])),
-    [activeAct, nextAct]
+    () =>
+      resolveMountedActs({
+        activeAct,
+        totalActs: WORLD_PHASES.length,
+        warmupActIndex,
+        warmupReady,
+        rebirthBlend,
+      }),
+    [activeAct, rebirthBlend, warmupActIndex, warmupReady]
   );
   const ambientParticleMode =
     rebirthBlend > 0.45
@@ -98,13 +112,18 @@ export function SceneManager() {
       ambientParticleMode,
     });
     audit.pruneHeroModels([activeHeroLabel]);
-    audit.pruneFxLayers(activeAct === WORLD_PHASES.length - 1 ? ["apotheosis-core"] : []);
+    audit.pruneFxLayers(
+      !isWarmupMount && activeAct === WORLD_PHASES.length - 1
+        ? ["apotheosis-core"]
+        : []
+    );
   }, [
     activeAct,
     activeHeroAsset,
     activeHeroLabel,
     ambientParticleMode,
     currentProfile.overlayMode,
+    isWarmupMount,
     mountedActs,
   ]);
 
@@ -141,7 +160,7 @@ export function SceneManager() {
 
   useFrame((state) => {
     const blendT = computeCrossfadeBlend(
-      actProgress,
+      effectiveActProgress,
       currentProfile.transitionRig
     );
 

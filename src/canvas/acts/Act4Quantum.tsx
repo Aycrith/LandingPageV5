@@ -1,19 +1,10 @@
 "use client";
 
-import { useRef, useMemo, Suspense, useEffect } from "react";
+import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { CrystalMaterial } from "@/canvas/materials/CrystalMaterial";
-import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
-import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { seededSigned, seededUnit } from "@/lib/random";
-import {
-  fitScaleToViewportFill,
-  getViewportHeightAtDistance,
-  useSceneBounds,
-  useStableSceneClone,
-} from "@/lib/scene";
 import { useRepeatingTexture } from "@/lib/textures";
 import { useActMaterialTierConfig, getTextureSamplingOptions } from "./materialTierConfig";
 import { DottedWave } from "@/canvas/environment/DottedWave";
@@ -22,111 +13,11 @@ interface ActProps {
   progress: number;
   visible: boolean;
 }
-
-const ACT_PROFILE = ACT_VIEWPORT_PROFILES[3];
-
-function QuantumModel({ progress }: { progress: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const gltf = useGLTF("/models/quantum_leap/scene.gltf");
-  const sceneClone = useStableSceneClone(gltf.scene);
-  const bounds = useSceneBounds(gltf.scene);
-
-  const fittedMaxScale = useMemo(
-    () =>
-      fitScaleToViewportFill({
-        desiredScale: 0.02,
-        rawHeight: bounds.height,
-        maxFill: ACT_PROFILE.maxModelViewportFill * 0.95,
-        previewCamera: ACT_PROFILE.previewCamera,
-        settleCamera: ACT_PROFILE.settleCamera,
-      }),
-    [bounds.height]
-  );
-
-  useFrame((state) => {
-    if (!groupRef.current) return;
-    const t = state.clock.elapsedTime;
-    groupRef.current.rotation.y = t * 0.1;
-    const appear = Math.min(progress / 0.3, 1);
-    groupRef.current.scale.setScalar(Math.min(appear * 0.035, fittedMaxScale));
-    groupRef.current.position.set(
-      ACT_PROFILE.heroRig.splitDistance * 0.5,
-      Math.sin(t * 0.4) * 0.3,
-      0
-    );
-  });
-
-  return (
-    <group ref={groupRef}>
-      <primitive object={sceneClone} />
-    </group>
-  );
-}
-
-function ParadoxModel({ progress }: { progress: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const worldPosRef = useRef(new THREE.Vector3());
-  const gltf = useGLTF("/models/paradox_abstract_art_of_python.glb");
-  const sceneClone = useStableSceneClone(gltf.scene);
-  const bounds = useSceneBounds(gltf.scene);
-
-  const fittedMaxScale = useMemo(
-    () =>
-      fitScaleToViewportFill({
-        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
-        rawHeight: bounds.height,
-        maxFill:
-          ACT_PROFILE.maxModelViewportFill *
-          ACT_PROFILE.heroModelBehavior.fitPadding,
-        previewCamera: ACT_PROFILE.previewCamera,
-        settleCamera: ACT_PROFILE.settleCamera,
-      }),
-    [bounds.height]
-  );
-
-  useFrame((state) => {
-    if (!groupRef.current) return;
-    const t = state.clock.elapsedTime;
-    const camera = state.camera as THREE.PerspectiveCamera;
-    groupRef.current.rotation.y = -t * 0.15;
-    groupRef.current.rotation.z = Math.sin(t * 0.3) * 0.2;
-    const appear = Math.max(0, (progress - 0.15) / 0.3);
-    const desiredScale =
-      Math.min(appear, 1) * ACT_PROFILE.heroModelBehavior.maxScale;
-    const appliedScale = Math.min(desiredScale, fittedMaxScale);
-    groupRef.current.scale.setScalar(appliedScale);
-    groupRef.current.position.set(
-      -ACT_PROFILE.heroRig.splitDistance * 0.5,
-      Math.sin(t * 0.4 + Math.PI) * 0.3,
-      0
-    );
-
-    groupRef.current.getWorldPosition(worldPosRef.current);
-    const distance = worldPosRef.current.distanceTo(camera.position);
-    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
-
-    useViewportAuditStore.getState().reportHeroModel("act4-paradox", {
-      desiredScale,
-      appliedScale,
-      fillRatio: (bounds.height * appliedScale) / visibleHeight,
-      maxFill: ACT_PROFILE.maxModelViewportFill,
-    });
-  });
-
-  return (
-    <group ref={groupRef}>
-      <primitive object={sceneClone} />
-    </group>
-  );
-}
-
 export function Act4Quantum({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
   const attractor1Ref = useRef<THREE.Mesh>(null);
   const attractor2Ref = useRef<THREE.Mesh>(null);
   const orbitalsRef = useRef<THREE.InstancedMesh>(null);
-  const quantumModelGroupRef = useRef<THREE.Group>(null);
-  const paradoxModelGroupRef = useRef<THREE.Group>(null);
 
   const tierConfig = useActMaterialTierConfig(3);
   const orbitalCount = tierConfig.mesh.orbitalCount;
@@ -149,12 +40,6 @@ export function Act4Quantum({ progress, visible }: ActProps) {
 
   const quatTempRef = useRef(new THREE.Quaternion());
   const posTempRef = useRef(new THREE.Vector3());
-
-  useEffect(() => {
-    return () => {
-      useViewportAuditStore.getState().clearHeroModel("act4-paradox");
-    };
-  }, []);
 
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
@@ -205,14 +90,6 @@ export function Act4Quantum({ progress, visible }: ActProps) {
         orbitalsRef.current.setMatrixAt(i, dummy.matrix);
       }
       orbitalsRef.current.instanceMatrix.needsUpdate = true;
-    }
-
-    // LOD switch: only one hero model active at a time to halve triangle budget
-    if (quantumModelGroupRef.current) {
-      quantumModelGroupRef.current.visible = progress < 0.65;
-    }
-    if (paradoxModelGroupRef.current) {
-      paradoxModelGroupRef.current.visible = progress > 0.35;
     }
 
     groupRef.current.visible = progress > 0.01;
@@ -280,16 +157,6 @@ export function Act4Quantum({ progress, visible }: ActProps) {
 
       <EnergyBeam progress={progress} beamPoints={tierConfig.mesh.beamPoints} />
       <Ground103Floor progress={progress} />
-
-      <Suspense fallback={null}>
-        <group ref={quantumModelGroupRef}>
-          <QuantumModel progress={progress} />
-        </group>
-        <group ref={paradoxModelGroupRef}>
-          <ParadoxModel progress={progress} />
-        </group>
-      </Suspense>
-
       <pointLight
         color="#ffd06f"
         intensity={10 * tierConfig.material.emissiveScale}
@@ -405,6 +272,3 @@ function Ground103Floor({ progress }: { progress: number }) {
     </mesh>
   );
 }
-
-useGLTF.preload("/models/quantum_leap/scene.gltf");
-useGLTF.preload("/models/paradox_abstract_art_of_python.glb");

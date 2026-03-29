@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { type QualityTier } from "@/stores/capsStore";
 import { useCursorStore } from "@/stores/cursorStore";
+import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { useRepeatingTexture } from "@/lib/textures";
 import { seededUnit } from "@/lib/random";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/scene";
 import { CuratedHeroLayer } from "./CuratedHeroLayer";
 import { VolumetricUI } from "./VolumetricUI";
+import { resolveMountedActs } from "./runtimeMounting";
 import { WORLD_PHASES } from "./viewportProfiles";
 import { VoidParticleField } from "./particles/VoidParticleField";
 import { computeActPresence, computeCrossfadeBlend } from "@/lib/transition";
@@ -74,34 +76,58 @@ export function SeamlessWorld({
   phaseBlend,
   tier,
 }: SeamlessWorldProps) {
+  const warmupActIndex = useSceneLoadStore((state) => state.warmupActIndex);
+  const warmupReady = useSceneLoadStore((state) => state.warmupReady);
+  const resolvedActiveAct = activeAct;
+  const effectivePhaseBlend = phaseBlend;
   const nextAct = wrapNext(activeAct);
-  const currentProfile = WORLD_PHASES[activeAct];
+  const currentProfile = WORLD_PHASES[resolvedActiveAct];
   const nextProfile = WORLD_PHASES[nextAct];
   const rebirthThreshold =
-    activeAct === WORLD_PHASES.length - 1
+    resolvedActiveAct === WORLD_PHASES.length - 1
       ? currentProfile.transitionRig.rebirth
       : 1;
   const rebirthBlend =
-    activeAct === WORLD_PHASES.length - 1
-      ? smoothWeight((phaseBlend - rebirthThreshold) / (1 - rebirthThreshold))
+    resolvedActiveAct === WORLD_PHASES.length - 1
+      ? smoothWeight(
+          (effectivePhaseBlend - rebirthThreshold) / (1 - rebirthThreshold)
+        )
       : 0;
+  const mountedActIndices = useMemo(
+    () =>
+      resolveMountedActs({
+        activeAct: resolvedActiveAct,
+        totalActs: WORLD_PHASES.length,
+        warmupActIndex,
+        warmupReady,
+        rebirthBlend,
+      }),
+    [rebirthBlend, resolvedActiveAct, warmupActIndex, warmupReady]
+  );
+  const metricActIndex =
+    activeAct === WORLD_PHASES.length - 1 && rebirthBlend > 0.46 ? 0 : activeAct;
 
   const weights = useMemo(() => {
-    const currentWeight = computeActPresence(
-      phaseBlend,
-      currentProfile.transitionRig
-    );
-    const crossfade = computeCrossfadeBlend(
-      phaseBlend,
-      currentProfile.transitionRig
-    );
     // Ensure the array always has at least 6 slots for Act 6 support
     const len = Math.max(WORLD_PHASES.length, 6);
     const list = Array.from({ length: len }, () => 0);
-    list[activeAct] = currentWeight;
+    const currentWeight = computeActPresence(
+      effectivePhaseBlend,
+      currentProfile.transitionRig
+    );
+    const crossfade = computeCrossfadeBlend(
+      effectivePhaseBlend,
+      currentProfile.transitionRig
+    );
+    list[resolvedActiveAct] = currentWeight;
     list[nextAct] = crossfade;
     return list;
-  }, [activeAct, nextAct, phaseBlend, currentProfile.transitionRig]);
+  }, [
+    currentProfile.transitionRig,
+    effectivePhaseBlend,
+    nextAct,
+    resolvedActiveAct,
+  ]);
 
   // Sentience bridge: curved arc spanning the dual poles
   const sentienceBridgeCurve = useMemo(
@@ -221,12 +247,12 @@ export function SeamlessWorld({
     const t = state.clock.elapsedTime;
     const cursor = useCursorStore.getState();
     const metabolism =
-      currentProfile.motionRig.metabolism * (1 - phaseBlend) +
-      nextProfile.motionRig.metabolism * phaseBlend;
+      currentProfile.motionRig.metabolism * (1 - effectivePhaseBlend) +
+      nextProfile.motionRig.metabolism * effectivePhaseBlend;
     const pointerStrength =
-      currentProfile.motionRig.pointerInfluence * (1 - phaseBlend) +
-      nextProfile.motionRig.pointerInfluence * phaseBlend;
-    const currentWeight = weights[activeAct];
+      currentProfile.motionRig.pointerInfluence * (1 - effectivePhaseBlend) +
+      nextProfile.motionRig.pointerInfluence * effectivePhaseBlend;
+    const currentWeight = weights[resolvedActiveAct];
     const seedWeight = weights[0] + rebirthBlend;
     const scaffoldWeight = weights[1];
     const circulationWeight = weights[2];
@@ -237,17 +263,17 @@ export function SeamlessWorld({
       THREE.MathUtils.lerp(
         currentProfile.worldAnchor[0],
         nextProfile.worldAnchor[0],
-        phaseBlend
+        effectivePhaseBlend
       ),
       THREE.MathUtils.lerp(
         currentProfile.worldAnchor[1],
         nextProfile.worldAnchor[1],
-        phaseBlend
+        effectivePhaseBlend
       ),
       THREE.MathUtils.lerp(
         currentProfile.worldAnchor[2],
         nextProfile.worldAnchor[2],
-        phaseBlend
+        effectivePhaseBlend
       )
     );
     pointerOffset.set(
@@ -266,7 +292,7 @@ export function SeamlessWorld({
     const stageHeight = THREE.MathUtils.lerp(
       currentProfile.stageVolume.height,
       nextProfile.stageVolume.height,
-      phaseBlend
+      effectivePhaseBlend
     );
     const worldFillRatio = computeViewportFillRatio(stageHeight * 0.52, 1, visibleHeight);
     const worldLod = resolveDetailLod({
@@ -292,10 +318,13 @@ export function SeamlessWorld({
 
     fogColor
       .set(currentProfile.fogProfile.color)
-      .lerp(new THREE.Color(nextProfile.fogProfile.color), phaseBlend);
+      .lerp(new THREE.Color(nextProfile.fogProfile.color), effectivePhaseBlend);
     fogSecondary
       .set(currentProfile.fogProfile.secondaryColor)
-      .lerp(new THREE.Color(nextProfile.fogProfile.secondaryColor), phaseBlend);
+      .lerp(
+        new THREE.Color(nextProfile.fogProfile.secondaryColor),
+        effectivePhaseBlend
+      );
 
     if (fogFarRef.current) {
       fogFarRef.current.position.copy(worldAnchor);
@@ -318,7 +347,7 @@ export function SeamlessWorld({
         THREE.MathUtils.lerp(
           currentProfile.fogProfile.layerOpacity,
           nextProfile.fogProfile.layerOpacity,
-          phaseBlend
+          effectivePhaseBlend
         ) * 0.72 * fogLodMultiplier;
     }
     if (fogNearMaterialRef.current) {
@@ -327,7 +356,7 @@ export function SeamlessWorld({
         THREE.MathUtils.lerp(
           currentProfile.fogProfile.layerOpacity,
           nextProfile.fogProfile.layerOpacity,
-          phaseBlend
+          effectivePhaseBlend
         ) * 0.54 * fogLodMultiplier;
     }
     if (fogFrontMaterialRef.current) {
@@ -336,7 +365,7 @@ export function SeamlessWorld({
         THREE.MathUtils.lerp(
           currentProfile.fogProfile.foregroundOpacity,
           nextProfile.fogProfile.foregroundOpacity,
-          phaseBlend
+          effectivePhaseBlend
         ) * 0.6 * fogLodMultiplier;
     }
 
@@ -476,7 +505,9 @@ export function SeamlessWorld({
           : (0.06 + currentWeight * 0.05) * particleLodMultiplier;
       material.size = (worldLod === "streamlined" ? 0.03 : 0.035) + currentWeight * 0.002;
       sporeColorNext.set(nextProfile.accent);
-      sporeColorLerp.set(currentProfile.accent).lerp(sporeColorNext, phaseBlend);
+      sporeColorLerp
+        .set(currentProfile.accent)
+        .lerp(sporeColorNext, effectivePhaseBlend);
       material.color.copy(sporeColorLerp);
     }
 
@@ -486,7 +517,7 @@ export function SeamlessWorld({
         THREE.MathUtils.lerp(
           currentProfile.shadowProfile.receiverY,
           nextProfile.shadowProfile.receiverY,
-          phaseBlend
+          effectivePhaseBlend
         ),
         worldAnchor.z
       );
@@ -494,7 +525,7 @@ export function SeamlessWorld({
         THREE.MathUtils.lerp(
           currentProfile.shadowProfile.radius,
           nextProfile.shadowProfile.radius,
-          phaseBlend
+          effectivePhaseBlend
         )
       );
     }
@@ -506,7 +537,7 @@ export function SeamlessWorld({
         ? THREE.MathUtils.lerp(
             currentProfile.shadowProfile.opacity,
             nextProfile.shadowProfile.opacity,
-            phaseBlend
+            effectivePhaseBlend
           ) * shadowLodMultiplier
         : 0;
     }
@@ -517,7 +548,7 @@ export function SeamlessWorld({
         THREE.MathUtils.lerp(
           currentProfile.fogProfile.drift,
           nextProfile.fogProfile.drift,
-          phaseBlend
+          effectivePhaseBlend
         ) * 0.0009;
       noiseTex.offset.y += 0.00025;
     }
@@ -734,11 +765,8 @@ export function SeamlessWorld({
 
       <Suspense fallback={null}>
         <CuratedHeroLayer
-          activeMetricIndex={
-            activeAct === WORLD_PHASES.length - 1 && rebirthBlend > 0.46
-              ? 0
-              : activeAct
-          }
+          metricActIndex={metricActIndex}
+          mountedActIndices={mountedActIndices}
           weights={weights}
           rebirthBlend={rebirthBlend}
           worldAnchor={worldAnchor}
@@ -747,9 +775,9 @@ export function SeamlessWorld({
       </Suspense>
 
       <VolumetricUI
-        activeAct={activeAct}
+        activeAct={resolvedActiveAct}
         nextAct={nextAct}
-        blend={phaseBlend}
+        blend={effectivePhaseBlend}
       />
     </group>
   );

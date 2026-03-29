@@ -1,19 +1,10 @@
 "use client";
 
-import { useRef, useMemo, Suspense, useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { HologramMaterial } from "@/canvas/materials/HologramMaterial";
-import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
-import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { seededUnit } from "@/lib/random";
-import {
-  fitScaleToViewportFill,
-  getViewportHeightAtDistance,
-  useSceneBounds,
-  useStableSceneClone,
-} from "@/lib/scene";
 import { useRepeatingTexture } from "@/lib/textures";
 import { GradientBlurBg } from "@/canvas/environment/GradientBlurBg";
 import { DottedWave } from "@/canvas/environment/DottedWave";
@@ -22,65 +13,6 @@ interface ActProps {
   progress: number;
   visible: boolean;
 }
-
-const ACT_PROFILE = ACT_VIEWPORT_PROFILES[2];
-
-function HologramModel({ progress }: { progress: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const worldPosRef = useRef(new THREE.Vector3());
-  const gltf = useGLTF("/models/hologram.glb");
-  const sceneClone = useStableSceneClone(gltf.scene);
-  const bounds = useSceneBounds(gltf.scene);
-
-  const fittedMaxScale = useMemo(
-    () =>
-      fitScaleToViewportFill({
-        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
-        rawHeight: bounds.height,
-        maxFill:
-          ACT_PROFILE.maxModelViewportFill *
-          ACT_PROFILE.heroModelBehavior.fitPadding,
-        previewCamera: ACT_PROFILE.previewCamera,
-        settleCamera: ACT_PROFILE.settleCamera,
-      }),
-    [bounds.height]
-  );
-
-  useFrame((state) => {
-    if (!groupRef.current) return;
-    const t = state.clock.elapsedTime;
-    const camera = state.camera as THREE.PerspectiveCamera;
-    groupRef.current.rotation.y = t * 0.2;
-    const appear = Math.max(0, (progress - 0.2) / 0.3);
-    const desiredScale =
-      THREE.MathUtils.lerp(
-        ACT_PROFILE.heroModelBehavior.baseScale,
-        ACT_PROFILE.heroModelBehavior.maxScale,
-        Math.min(appear, 1)
-      );
-    const appliedScale = Math.min(desiredScale, fittedMaxScale);
-    groupRef.current.scale.setScalar(appliedScale);
-    groupRef.current.position.y = Math.sin(t * 0.5) * 0.18 + 1.45;
-
-    groupRef.current.getWorldPosition(worldPosRef.current);
-    const distance = worldPosRef.current.distanceTo(camera.position);
-    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
-
-    useViewportAuditStore.getState().reportHeroModel("act3-hologram", {
-      desiredScale,
-      appliedScale,
-      fillRatio: (bounds.height * appliedScale) / visibleHeight,
-      maxFill: ACT_PROFILE.maxModelViewportFill,
-    });
-  });
-
-  return (
-    <group ref={groupRef} position={[2.9, 1.4, -0.85]}>
-      <primitive object={sceneClone} />
-    </group>
-  );
-}
-
 export function Act3Flow({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
   const surfaceRef = useRef<THREE.Mesh>(null);
@@ -120,9 +52,10 @@ export function Act3Flow({ progress, visible }: ActProps) {
 
   useEffect(() => {
     return () => {
-      useViewportAuditStore.getState().clearHeroModel("act3-hologram");
+      planeGeo.dispose();
+      ribbonGeometries.forEach((geometry) => geometry.dispose());
     };
-  }, []);
+  }, [planeGeo, ribbonGeometries]);
 
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
@@ -198,11 +131,6 @@ export function Act3Flow({ progress, visible }: ActProps) {
           progress={progress}
         />
       ))}
-
-      <Suspense fallback={null}>
-        <HologramModel progress={progress} />
-      </Suspense>
-
       <Metal049ASurface progress={progress} />
 
       <mesh position={[2.9, 0.4, -0.9]}>
@@ -307,5 +235,3 @@ function Metal049ASurface({ progress }: { progress: number }) {
     </mesh>
   );
 }
-
-useGLTF.preload("/models/hologram.glb");

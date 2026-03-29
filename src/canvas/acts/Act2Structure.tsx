@@ -1,17 +1,15 @@
 "use client";
 
-import { useRef, useMemo, Suspense, useEffect } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { WireframePulseMaterial } from "@/canvas/materials/WireframePulse";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
-import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { seededUnit } from "@/lib/random";
 import { DynamicShaderBg } from "@/canvas/environment/DynamicShaderBg";
 import {
   fitScaleToViewportFill,
-  getViewportHeightAtDistance,
   useSceneBounds,
   useStableSceneClone,
 } from "@/lib/scene";
@@ -23,60 +21,6 @@ interface ActProps {
 }
 
 const ACT_PROFILE = ACT_VIEWPORT_PROFILES[1];
-
-function GlobeModel({ progress }: { progress: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const worldPosRef = useRef(new THREE.Vector3());
-  const gltf = useGLTF("/models/wireframe_3d_globe.glb");
-  const sceneClone = useStableSceneClone(gltf.scene);
-  const bounds = useSceneBounds(gltf.scene);
-
-  const fittedMaxScale = useMemo(
-    () =>
-      fitScaleToViewportFill({
-        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
-        rawHeight: bounds.height,
-        maxFill:
-          ACT_PROFILE.maxModelViewportFill *
-          ACT_PROFILE.heroModelBehavior.fitPadding,
-        previewCamera: ACT_PROFILE.previewCamera,
-        settleCamera: ACT_PROFILE.settleCamera,
-      }),
-    [bounds.height]
-  );
-
-  useFrame((state) => {
-    if (!groupRef.current) return;
-    groupRef.current.rotation.y = state.clock.elapsedTime * 0.12;
-    const desiredScale =
-      THREE.MathUtils.lerp(
-        ACT_PROFILE.heroModelBehavior.baseScale,
-        ACT_PROFILE.heroModelBehavior.maxScale,
-        Math.min(progress / 0.3, 1)
-      );
-    const appliedScale = Math.min(desiredScale, fittedMaxScale);
-    const camera = state.camera as THREE.PerspectiveCamera;
-
-    groupRef.current.scale.setScalar(appliedScale);
-    groupRef.current.position.set(2.35, 0.15, -0.2);
-    groupRef.current.getWorldPosition(worldPosRef.current);
-    const distance = worldPosRef.current.distanceTo(camera.position);
-    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
-
-    useViewportAuditStore.getState().reportHeroModel("act2-globe", {
-      desiredScale,
-      appliedScale,
-      fillRatio: (bounds.height * appliedScale) / visibleHeight,
-      maxFill: ACT_PROFILE.maxModelViewportFill,
-    });
-  });
-
-  return (
-    <group ref={groupRef}>
-      <primitive object={sceneClone} />
-    </group>
-  );
-}
 
 function SatellitesModel({ progress }: { progress: number }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -131,12 +75,6 @@ export function Act2Structure({ progress, visible }: ActProps) {
     }));
   }, []);
 
-  useEffect(() => {
-    return () => {
-      useViewportAuditStore.getState().clearHeroModel("act2-globe");
-    };
-  }, []);
-
   useFrame((state) => {
     if (!visible || !groupRef.current) return;
     const t = state.clock.elapsedTime;
@@ -177,10 +115,8 @@ export function Act2Structure({ progress, visible }: ActProps) {
 
     const fadeIn = Math.min(progress / 0.15, 1);
     const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
-    groupRef.current.visible = fadeIn * fadeOut > 0.01;
+    groupRef.current.visible = visible && fadeIn * fadeOut > 0.01;
   });
-
-  if (!visible) return null;
 
   return (
     <group ref={groupRef}>
@@ -207,7 +143,6 @@ export function Act2Structure({ progress, visible }: ActProps) {
       </instancedMesh>
 
       <Suspense fallback={null}>
-        <GlobeModel progress={progress} />
         <SatellitesModel progress={progress} />
       </Suspense>
 
@@ -267,6 +202,4 @@ function Rock063Ground({ progress }: { progress: number }) {
     </mesh>
   );
 }
-
-useGLTF.preload("/models/wireframe_3d_globe.glb");
 useGLTF.preload("/models/satellites/scene.gltf");

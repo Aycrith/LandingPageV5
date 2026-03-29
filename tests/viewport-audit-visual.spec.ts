@@ -32,6 +32,8 @@ async function runFlagshipVisualAudit(
   expect(firstFrame?.metrics.telemetry.startupTimeMs).toBeGreaterThan(0);
   expect(firstFrame?.metrics.telemetry.hasFallbackTriggered).toBe(false);
   expect(firstFrame?.metrics.telemetry.tier).toBe("high");
+  expect(firstFrame?.metrics.telemetry.startupPhase).toBe("ready");
+  expect(firstFrame?.metrics.telemetry.lateRequestCount).toBe(0);
 
   await captureScreenshot(page, testInfo, `${prefix}-first-visible-frame`);
 
@@ -41,6 +43,7 @@ async function runFlagshipVisualAudit(
 
     expect(sample).not.toBeNull();
     expect(sample?.isContextLost).toBeFalsy();
+    expect(sample?.metrics.telemetry.lateRequestCount).toBe(0);
     expect(sample?.metrics.sceneState.activeHeroLabel).toBe(snapshot.heroLabel);
     expect(sample?.metrics.sceneState.activeHeroAsset).toBe(snapshot.heroAsset);
     for (const act of snapshot.containsActs) {

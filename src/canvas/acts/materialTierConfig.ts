@@ -344,19 +344,19 @@ export const ACT_MATERIAL_TIER_CONFIG: Record<number, Record<QualityTier, ActMat
   5: {
     high: {
       texture: textureConfig("full", { useColorMap: false, useNormalMap: false, useRoughnessMap: false, useMetalnessMap: false }),
-      mesh: meshConfig("high", { latticeCount: 1200, dendriteCount: 50, tubulinCount: 80, primaryDetail: 8, secondaryDetail: 6 }),
+      mesh: meshConfig("high", { latticeCount: 360, dendriteCount: 24, tubulinCount: 24, primaryDetail: 6, secondaryDetail: 5 }),
       shader: shaderConfig("full", { enableWarpBackground: false, enableShaderLines: false }),
       material: materialConfig("high", { emissiveScale: 1.08, transmissionScale: 1.1 }),
     },
     medium: {
       texture: textureConfig("half", { useColorMap: false, useNormalMap: false, useRoughnessMap: false, useMetalnessMap: false }),
-      mesh: meshConfig("medium", { latticeCount: 600, dendriteCount: 25, tubulinCount: 40, primaryDetail: 6, secondaryDetail: 5 }),
+      mesh: meshConfig("medium", { latticeCount: 220, dendriteCount: 12, tubulinCount: 12, primaryDetail: 5, secondaryDetail: 4 }),
       shader: shaderConfig("reduced", { enableWarpBackground: false, enableShaderLines: false }),
       material: materialConfig("medium", { emissiveScale: 0.94, transmissionScale: 0.92 }),
     },
     low: {
       texture: textureConfig("quarter", { useColorMap: false, useNormalMap: false, useRoughnessMap: false, useMetalnessMap: false }),
-      mesh: meshConfig("low", { latticeCount: 200, dendriteCount: 10, tubulinCount: 0, primaryDetail: 4, secondaryDetail: 4 }),
+      mesh: meshConfig("low", { latticeCount: 120, dendriteCount: 6, tubulinCount: 0, primaryDetail: 4, secondaryDetail: 4 }),
       shader: shaderConfig("basic", { enableWarpBackground: false, enableShaderLines: false }),
       material: materialConfig("low", { emissiveScale: 0.78, transmissionScale: 0.55 }),
     },

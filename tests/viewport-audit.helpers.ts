@@ -152,6 +152,7 @@ export function unexpectedWarnings(warnings: string[]) {
 
     if (
       warning.includes("[StartupReadinessGate] Critical assets timed out") ||
+      warning.includes("[StartupReadinessGate] Startup pipeline timed out") ||
       warning.includes("[StartupReadinessGate] Stable frames timed out")
     ) {
       return false;

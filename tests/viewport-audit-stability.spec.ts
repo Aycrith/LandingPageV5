@@ -46,6 +46,10 @@ test.describe("viewport audit stability", () => {
     const idleSnapshot = await sampleCanvas(page);
     expect(idleSnapshot).not.toBeNull();
     expect(idleSnapshot?.isContextLost).toBeFalsy();
+    expect(idleSnapshot?.metrics.telemetry.assetManifestReady).toBe(true);
+    expect(idleSnapshot?.metrics.telemetry.warmupReady).toBe(true);
+    expect(idleSnapshot?.metrics.telemetry.startupPhase).toBe("ready");
+    expect(idleSnapshot?.metrics.telemetry.lateRequestCount).toBe(0);
     expect(idleSnapshot?.metrics.renderPipeline).toBeTruthy();
     expect(idleSnapshot?.metrics.renderPipeline?.samples ?? 0).toBeGreaterThan(30);
     expect(
@@ -78,6 +82,7 @@ test.describe("viewport audit stability", () => {
     const postSweep = await sampleCanvas(page);
     expect(postSweep).not.toBeNull();
     expect(postSweep?.isContextLost).toBeFalsy();
+    expect(postSweep?.metrics.telemetry.lateRequestCount).toBe(0);
     expect(postSweep?.metrics.renderPipeline).toBeTruthy();
 
     for (const progress of [0.06, 0.26, 0.46, 0.66, 0.86, 0.06]) {
@@ -87,17 +92,18 @@ test.describe("viewport audit stability", () => {
     const repeatedSweep = await sampleCanvas(page);
     expect(repeatedSweep).not.toBeNull();
     expect(repeatedSweep?.isContextLost).toBeFalsy();
+    expect(repeatedSweep?.metrics.telemetry.lateRequestCount).toBe(0);
     expect(repeatedSweep?.metrics.renderPipeline).toBeTruthy();
 
     if (postSweep?.metrics.renderPipeline && repeatedSweep?.metrics.renderPipeline) {
       expect(repeatedSweep.metrics.renderPipeline.renderer.geometries).toBeLessThanOrEqual(
-        postSweep.metrics.renderPipeline.renderer.geometries + 25
+        postSweep.metrics.renderPipeline.renderer.geometries
       );
       expect(repeatedSweep.metrics.renderPipeline.renderer.textures).toBeLessThanOrEqual(
-        postSweep.metrics.renderPipeline.renderer.textures + 15
+        postSweep.metrics.renderPipeline.renderer.textures
       );
       expect(repeatedSweep.metrics.renderPipeline.renderer.programs).toBeLessThanOrEqual(
-        postSweep.metrics.renderPipeline.renderer.programs + 10
+        postSweep.metrics.renderPipeline.renderer.programs
       );
     }
 
@@ -116,6 +122,7 @@ test.describe("viewport audit stability", () => {
       await page.waitForTimeout(400);
       const snapshot = await sampleCanvas(page);
       expect(snapshot?.isContextLost).toBeFalsy();
+      expect(snapshot?.metrics.telemetry.lateRequestCount).toBe(0);
       if (snapshot?.metrics.renderPipeline) {
         expect(snapshot.metrics.renderPipeline.renderer.triangles)
           .toBeLessThanOrEqual(280000);
@@ -127,7 +134,32 @@ test.describe("viewport audit stability", () => {
     // Confirm context still alive after full sweep
     const finalSnapshot = await sampleCanvas(page);
     expect(finalSnapshot?.isContextLost).toBeFalsy();
+    expect(finalSnapshot?.metrics.telemetry.lateRequestCount).toBe(0);
     expect(finalSnapshot?.metrics.renderPipeline).toBeTruthy();
+  });
+
+  test("scrolls immediately after readiness without secondary warmup or late asset loads", async ({
+    page,
+  }) => {
+    await waitForExperienceReady(page, "?audit=1&forceTier=high");
+
+    const firstVisible = await sampleCanvas(page);
+    expect(firstVisible?.metrics.telemetry.startupPhase).toBe("ready");
+    expect(firstVisible?.metrics.telemetry.assetManifestReady).toBe(true);
+    expect(firstVisible?.metrics.telemetry.warmupReady).toBe(true);
+    expect(firstVisible?.metrics.telemetry.lateRequestCount).toBe(0);
+
+    for (const progress of [0.22, 0.55, 0.72, 0.9]) {
+      await setAuditProgress(page, progress);
+      const snapshot = await sampleCanvas(page);
+      expect(snapshot?.isContextLost).toBeFalsy();
+      expect(snapshot?.metrics.telemetry.startupPhase).toBe("ready");
+      expect(snapshot?.metrics.telemetry.lateRequestCount).toBe(0);
+      expect(snapshot?.metrics.renderPipeline?.renderer.calls ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(80);
+      expect(snapshot?.metrics.renderPipeline?.renderer.triangles ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(280000);
+    }
   });
 
   test("enters safe mode when explicitly requested", async ({

@@ -187,3 +187,22 @@ export function useRepeatingTexture(
     wrapT: THREE.RepeatWrapping,
   });
 }
+
+export function preloadRepeatingTexture(
+  url: string,
+  options: Omit<SharedTextureOptions, "wrapS" | "wrapT"> = {}
+) {
+  acquireTexture(
+    createTextureKey(url, {
+      ...options,
+      wrapS: THREE.RepeatWrapping,
+      wrapT: THREE.RepeatWrapping,
+    }),
+    url,
+    {
+      ...options,
+      wrapS: THREE.RepeatWrapping,
+      wrapT: THREE.RepeatWrapping,
+    }
+  );
+}

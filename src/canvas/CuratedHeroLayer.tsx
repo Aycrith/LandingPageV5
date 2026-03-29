@@ -5,7 +5,6 @@ import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { useCapsStore, type RuntimeCaps } from "@/stores/capsStore";
-import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import {
   computeViewportFillRatio,
@@ -17,6 +16,7 @@ import {
   useSceneBounds,
   useStableSceneClone,
 } from "@/lib/scene";
+import { HERO_ASSET_PATHS } from "./assetManifest";
 import {
   WORLD_PHASES,
   type HeroAssetId,
@@ -31,7 +31,8 @@ import { Act4Quantum } from "./acts/Act4Quantum";
 import { Act5Convergence } from "./acts/Act5Convergence";
 
 interface CuratedHeroLayerProps {
-  activeMetricIndex: number;
+  metricActIndex: number;
+  mountedActIndices: number[];
   weights: number[];
   rebirthBlend: number;
   worldAnchor: THREE.Vector3;
@@ -70,8 +71,16 @@ type CuratedMesh = THREE.Mesh & {
     baseReceiveShadow?: boolean;
     detailWeight?: number;
     hasExpensiveTransparency?: boolean;
+    forceHide?: boolean;
   };
 };
+
+const DARK_STAR_OUTER_SHELL_PARENTS = new Set([
+  "Sph01001_23",
+  "Sph02001_24",
+  "Sph03001_25",
+  "Sph05001_26",
+]);
 
 interface PreparedHeroScene {
   materials: CuratedMaterial[];
@@ -103,7 +112,7 @@ const HERO_LOD_PROFILES: Record<
     clearcoatScale: 0.74,
     envMapScale: 0.88,
     roughnessBias: 0.05,
-    microTransparencyThreshold: 0.022,
+    microTransparencyThreshold: 0.12,
   },
   streamlined: {
     transmissionScale: 0.2,
@@ -111,17 +120,8 @@ const HERO_LOD_PROFILES: Record<
     clearcoatScale: 0.22,
     envMapScale: 0.58,
     roughnessBias: 0.14,
-    microTransparencyThreshold: 0.06,
+    microTransparencyThreshold: 0.18,
   },
-};
-
-const HERO_ASSET_PATHS: Record<HeroAssetId, string> = {
-  dark_star: "/models/dark_star/scene.gltf",
-  wireframe_globe: "/models/wireframe_3d_globe.glb",
-  hologram: "/models/hologram.glb",
-  quantum_leap: "/models/quantum_leap/scene.gltf",
-  paradox_abstract: "/models/paradox_abstract_art_of_python.glb",
-  black_hole: "/models/black_hole/scene.gltf",
 };
 
 function createCuratedMaterial(
@@ -254,8 +254,11 @@ function prepareHeroScene(
       return;
     }
 
-    mesh.castShadow = true;
-    mesh.receiveShadow = assetId !== "hologram";
+    // The opening seed scene exceeds the production triangle budget once the
+    // dark-star hero is rendered through the shadow map, so keep that asset
+    // unshadowed and reserve shadow rendering for lighter hero variants.
+    mesh.castShadow = assetId !== "dark_star";
+    mesh.receiveShadow = assetId !== "hologram" && assetId !== "dark_star";
     mesh.userData.baseCastShadow = mesh.castShadow;
     mesh.userData.baseReceiveShadow = mesh.receiveShadow;
 
@@ -269,6 +272,11 @@ function prepareHeroScene(
       0,
       1
     );
+    mesh.userData.forceHide =
+      assetId === "dark_star" &&
+      DARK_STAR_OUTER_SHELL_PARENTS.has(
+        (mesh.parent?.name ?? "").replaceAll(".", "")
+      );
 
     const assignMaterial = (source: THREE.Material) => {
       const nextMaterial = createCuratedMaterial(source, assetId, grade, accent);
@@ -351,7 +359,9 @@ function updateMeshLod(
   for (const mesh of meshes) {
     const detailWeight = mesh.userData.detailWeight ?? 1;
     const isExpensiveTransparency = mesh.userData.hasExpensiveTransparency ?? false;
-    mesh.visible = !(isExpensiveTransparency && detailWeight < threshold);
+    const forceHide = mesh.userData.forceHide ?? false;
+    mesh.visible =
+      !forceHide && !(isExpensiveTransparency && detailWeight < threshold);
     mesh.castShadow =
       enableShadows && lod === "cinematic" && Boolean(mesh.userData.baseCastShadow);
     mesh.receiveShadow =
@@ -402,7 +412,6 @@ function SeedHero({
   const fittedMaxScale = useHeroScale(profile, bounds.height);
 
   useEffect(() => {
-    useSceneLoadStore.getState().markCriticalAssetReady("seed-core");
     return () => {
       useViewportAuditStore.getState().clearHeroModel(profile.heroLabel);
     };
@@ -913,125 +922,120 @@ function ApotheosisHero({
 }
 
 export function CuratedHeroLayer({
-  activeMetricIndex,
+  metricActIndex,
+  mountedActIndices,
   weights,
   rebirthBlend,
   worldAnchor,
   pointerOffset,
 }: CuratedHeroLayerProps) {
   const runtimeCaps = useCapsStore((state) => state.caps);
-
-  // Progressive asset preloading: only load the current act and the next two so
-  // assets for acts 3-5 are not downloaded until the user scrolls toward them.
-  useEffect(() => {
-    const ASSETS_BY_ACT: string[][] = [
-      [HERO_ASSET_PATHS.dark_star],
-      [HERO_ASSET_PATHS.wireframe_globe],
-      [HERO_ASSET_PATHS.hologram],
-      [HERO_ASSET_PATHS.quantum_leap, HERO_ASSET_PATHS.paradox_abstract],
-      [HERO_ASSET_PATHS.black_hole],
-    ];
-    const limit = Math.min(activeMetricIndex + 2, ASSETS_BY_ACT.length - 1);
-    for (let i = activeMetricIndex; i <= limit; i++) {
-      ASSETS_BY_ACT[i].forEach((path) => useGLTF.preload(path));
-    }
-  }, [activeMetricIndex]);
+  const mountedActSet = useMemo(
+    () => new Set(mountedActIndices),
+    [mountedActIndices]
+  );
 
   return (
     <>
       {/* Each hero has its own Suspense boundary so they mount independently as their
           GLTFs resolve. Without this, a single shared boundary blocks all heroes until
-          every model is loaded — preventing SeedHero from marking seed-core ready. */}
-      <Suspense fallback={null}>
-        <SeedHero
-          profile={WORLD_PHASES[0]}
-          reportMetric={activeMetricIndex === 0}
-          weight={weights[0] + rebirthBlend}
-          worldAnchor={worldAnchor}
-          pointerOffset={pointerOffset}
-          runtimeCaps={runtimeCaps}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <Act1Emergence
-          progress={weights[0] + rebirthBlend}
-          visible={(weights[0] + rebirthBlend) > 0.01}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <ScaffoldHero
-          profile={WORLD_PHASES[1]}
-          reportMetric={activeMetricIndex === 1}
-          weight={weights[1]}
-          worldAnchor={worldAnchor}
-          pointerOffset={pointerOffset}
-          runtimeCaps={runtimeCaps}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <Act2Structure
-          progress={weights[1]}
-          visible={weights[1] > 0.01}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <CirculationHero
-          profile={WORLD_PHASES[2]}
-          reportMetric={activeMetricIndex === 2}
-          weight={weights[2]}
-          worldAnchor={worldAnchor}
-          pointerOffset={pointerOffset}
-          runtimeCaps={runtimeCaps}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <Act3Flow
-          progress={weights[2]}
-          visible={weights[2] > 0.01}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <SentienceHero
-          profile={WORLD_PHASES[3]}
-          reportMetric={activeMetricIndex === 3}
-          weight={weights[3]}
-          worldAnchor={worldAnchor}
-          pointerOffset={pointerOffset}
-          runtimeCaps={runtimeCaps}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <Act4Quantum
-          progress={weights[3]}
-          visible={weights[3] > 0.01}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <ApotheosisHero
-          profile={WORLD_PHASES[4]}
-          reportMetric={activeMetricIndex === 4}
-          weight={weights[4]}
-          worldAnchor={worldAnchor}
-          pointerOffset={pointerOffset}
-          runtimeCaps={runtimeCaps}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <Act5Convergence
-          progress={weights[4]}
-          visible={weights[4] > 0.01}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <Act6QuantumConsciousness
-          progress={weights[5] ?? 0}
-          visible={(weights[5] ?? 0) > 0.01}
-        />
-      </Suspense>
+          every model is loaded, which defeats the warmup pass and delays first input. */}
+      {mountedActSet.has(0) ? (
+        <Suspense fallback={null}>
+          <SeedHero
+            profile={WORLD_PHASES[0]}
+            reportMetric={metricActIndex === 0}
+            weight={weights[0] + rebirthBlend}
+            worldAnchor={worldAnchor}
+            pointerOffset={pointerOffset}
+            runtimeCaps={runtimeCaps}
+          />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(0) ? (
+        <Suspense fallback={null}>
+          <Act1Emergence
+            progress={weights[0] + rebirthBlend}
+            visible={(weights[0] + rebirthBlend) > 0.01}
+          />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(1) ? (
+        <Suspense fallback={null}>
+          <ScaffoldHero
+            profile={WORLD_PHASES[1]}
+            reportMetric={metricActIndex === 1}
+            weight={weights[1]}
+            worldAnchor={worldAnchor}
+            pointerOffset={pointerOffset}
+            runtimeCaps={runtimeCaps}
+          />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(1) ? (
+        <Suspense fallback={null}>
+          <Act2Structure progress={weights[1]} visible={weights[1] > 0.01} />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(2) ? (
+        <Suspense fallback={null}>
+          <CirculationHero
+            profile={WORLD_PHASES[2]}
+            reportMetric={metricActIndex === 2}
+            weight={weights[2]}
+            worldAnchor={worldAnchor}
+            pointerOffset={pointerOffset}
+            runtimeCaps={runtimeCaps}
+          />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(2) ? (
+        <Suspense fallback={null}>
+          <Act3Flow progress={weights[2]} visible={weights[2] > 0.01} />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(3) ? (
+        <Suspense fallback={null}>
+          <SentienceHero
+            profile={WORLD_PHASES[3]}
+            reportMetric={metricActIndex === 3}
+            weight={weights[3]}
+            worldAnchor={worldAnchor}
+            pointerOffset={pointerOffset}
+            runtimeCaps={runtimeCaps}
+          />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(3) ? (
+        <Suspense fallback={null}>
+          <Act4Quantum progress={weights[3]} visible={weights[3] > 0.01} />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(4) ? (
+        <Suspense fallback={null}>
+          <ApotheosisHero
+            profile={WORLD_PHASES[4]}
+            reportMetric={metricActIndex === 4}
+            weight={weights[4]}
+            worldAnchor={worldAnchor}
+            pointerOffset={pointerOffset}
+            runtimeCaps={runtimeCaps}
+          />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(4) ? (
+        <Suspense fallback={null}>
+          <Act5Convergence progress={weights[4]} visible={weights[4] > 0.01} />
+        </Suspense>
+      ) : null}
+      {mountedActSet.has(5) ? (
+        <Suspense fallback={null}>
+          <Act6QuantumConsciousness
+            progress={weights[5] ?? 0}
+            visible={(weights[5] ?? 0) > 0.01}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }
-
-// Preload only the first-act hero immediately; remaining heroes are loaded
-// progressively via CuratedHeroLayer as the user scrolls into each act.
-useGLTF.preload(HERO_ASSET_PATHS.dark_star);

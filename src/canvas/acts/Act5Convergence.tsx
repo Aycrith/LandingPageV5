@@ -1,18 +1,11 @@
 "use client";
 
-import { useRef, useMemo, Suspense, useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { seededUnit } from "@/lib/random";
-import {
-  fitScaleToViewportFill,
-  getViewportHeightAtDistance,
-  useSceneBounds,
-  useStableSceneClone,
-} from "@/lib/scene";
 import { WarpDriveBackground } from "@/canvas/environment/WarpDriveBackground";
 import { ShaderLinesField } from "@/canvas/environment/ShaderLinesField";
 import { useActMaterialTierConfig } from "./materialTierConfig";
@@ -23,66 +16,6 @@ interface ActProps {
 }
 
 const ACT_PROFILE = ACT_VIEWPORT_PROFILES[4];
-
-function BlackHoleModel({ progress }: { progress: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const worldPosRef = useRef(new THREE.Vector3());
-  const gltf = useGLTF("/models/black_hole/scene.gltf");
-  const sceneClone = useStableSceneClone(gltf.scene);
-  const bounds = useSceneBounds(gltf.scene);
-
-  const fittedMaxScale = useMemo(
-    () =>
-      fitScaleToViewportFill({
-        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
-        rawHeight: bounds.height,
-        maxFill:
-          ACT_PROFILE.maxModelViewportFill *
-          ACT_PROFILE.heroModelBehavior.fitPadding,
-        previewCamera: ACT_PROFILE.previewCamera,
-        settleCamera: ACT_PROFILE.settleCamera,
-      }),
-    [bounds.height]
-  );
-
-  useFrame((state) => {
-    if (!groupRef.current) return;
-    groupRef.current.rotation.y = state.clock.elapsedTime * 0.1;
-    const desiredScale =
-      THREE.MathUtils.lerp(
-        ACT_PROFILE.heroModelBehavior.baseScale,
-        ACT_PROFILE.heroModelBehavior.maxScale,
-        Math.min(progress / 0.3, 1)
-      );
-    const appliedScale = Math.min(desiredScale, fittedMaxScale);
-    const camera = state.camera as THREE.PerspectiveCamera;
-
-    groupRef.current.scale.setScalar(appliedScale);
-    groupRef.current.getWorldPosition(worldPosRef.current);
-    const distance = worldPosRef.current.distanceTo(camera.position);
-    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
-
-    useViewportAuditStore.getState().reportHeroModel("act5-black-hole", {
-      desiredScale,
-      appliedScale,
-      fillRatio: (bounds.height * appliedScale) / visibleHeight,
-      maxFill: ACT_PROFILE.maxModelViewportFill,
-    });
-  });
-
-  return (
-    <group
-      ref={groupRef}
-      position={[
-        ACT_PROFILE.heroModelBehavior.focusOffset[0],
-        ACT_PROFILE.heroModelBehavior.focusOffset[1],
-        ACT_PROFILE.heroModelBehavior.focusOffset[2],
-      ]}
-    >
-      <primitive object={sceneClone} />
-    </group>
-  );
-}
 
 export function Act5Convergence({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
@@ -112,7 +45,6 @@ export function Act5Convergence({ progress, visible }: ActProps) {
 
   useEffect(() => {
     return () => {
-      useViewportAuditStore.getState().clearHeroModel("act5-black-hole");
       useViewportAuditStore.getState().clearFxLayer("act5-inner-core");
     };
   }, []);
@@ -271,11 +203,6 @@ export function Act5Convergence({ progress, visible }: ActProps) {
           toneMapped={false}
         />
       </instancedMesh>
-
-      <Suspense fallback={null}>
-        <BlackHoleModel progress={progress} />
-      </Suspense>
-
       <pointLight
         color="#ff7eb3"
         intensity={progress * 24 * tierConfig.material.emissiveScale}
@@ -298,5 +225,3 @@ export function Act5Convergence({ progress, visible }: ActProps) {
     </group>
   );
 }
-
-useGLTF.preload("/models/black_hole/scene.gltf");

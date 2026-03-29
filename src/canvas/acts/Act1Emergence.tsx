@@ -1,18 +1,10 @@
 "use client";
 
-import { useRef, useMemo, Suspense, useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
-import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
-import {
-  fitScaleToViewportFill,
-  getViewportHeightAtDistance,
-  useSceneBounds,
-  useStableSceneClone,
-} from "@/lib/scene";
 
 interface ActProps {
   progress: number;
@@ -20,77 +12,6 @@ interface ActProps {
 }
 
 const ACT_PROFILE = ACT_VIEWPORT_PROFILES[0];
-
-function DarkStarModel({ progress }: { progress: number }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const worldPosRef = useRef(new THREE.Vector3());
-  const gltf = useGLTF("/models/dark_star/scene.gltf");
-  const sceneClone = useStableSceneClone(gltf.scene);
-  const bounds = useSceneBounds(gltf.scene);
-  const markCriticalAssetReady = useSceneLoadStore((s) => s.markCriticalAssetReady);
-
-  const fittedMaxScale = useMemo(
-    () =>
-      fitScaleToViewportFill({
-        desiredScale: ACT_PROFILE.heroModelBehavior.maxScale,
-        rawHeight: bounds.height,
-        maxFill:
-          ACT_PROFILE.maxModelViewportFill *
-          ACT_PROFILE.heroModelBehavior.fitPadding,
-        previewCamera: ACT_PROFILE.previewCamera,
-        settleCamera: ACT_PROFILE.settleCamera,
-      }),
-    [bounds.height]
-  );
-
-  useEffect(() => {
-    markCriticalAssetReady("seed-core");
-    return () => {
-      useViewportAuditStore.getState().clearHeroModel("act1-dark-star");
-    };
-  }, [markCriticalAssetReady]);
-
-  useFrame((state) => {
-    if (!groupRef.current) return;
-
-    const t = state.clock.elapsedTime;
-    groupRef.current.rotation.y = t * 0.15;
-    groupRef.current.rotation.x = Math.sin(t * 0.1) * 0.05;
-
-    const desiredScale = THREE.MathUtils.lerp(
-      ACT_PROFILE.heroModelBehavior.baseScale,
-      ACT_PROFILE.heroModelBehavior.maxScale,
-      progress
-    );
-    const clampedScale = Math.min(desiredScale, fittedMaxScale);
-    const camera = state.camera as THREE.PerspectiveCamera;
-
-    groupRef.current.scale.setScalar(clampedScale);
-    groupRef.current.position.set(
-      ACT_PROFILE.heroModelBehavior.focusOffset[0],
-      ACT_PROFILE.heroModelBehavior.focusOffset[1] -
-        bounds.center.y * clampedScale * 0.08,
-      ACT_PROFILE.heroModelBehavior.focusOffset[2]
-    );
-
-    groupRef.current.getWorldPosition(worldPosRef.current);
-    const distance = worldPosRef.current.distanceTo(camera.position);
-    const visibleHeight = getViewportHeightAtDistance(distance, camera.fov);
-
-    useViewportAuditStore.getState().reportHeroModel("act1-dark-star", {
-      desiredScale,
-      appliedScale: clampedScale,
-      fillRatio: (bounds.height * clampedScale) / visibleHeight,
-      maxFill: ACT_PROFILE.maxModelViewportFill,
-    });
-  });
-
-  return (
-    <group ref={groupRef}>
-      <primitive object={sceneClone} />
-    </group>
-  );
-}
 
 export function Act1Emergence({ progress, visible }: ActProps) {
   const groupRef = useRef<THREE.Group>(null);
@@ -264,12 +185,6 @@ export function Act1Emergence({ progress, visible }: ActProps) {
         distance={30}
         decay={2}
       />
-
-      <Suspense fallback={null}>
-        <DarkStarModel progress={progress} />
-      </Suspense>
     </group>
   );
 }
-
-useGLTF.preload("/models/dark_star/scene.gltf");

@@ -62,6 +62,13 @@ interface TelemetryMetric {
   startupTimeMs: number | null;
   safeModeReason: string | null;
   tier: string | null;
+  startupPhase: string | null;
+  assetProgress: number;
+  warmupProgress: number;
+  assetManifestReady: boolean;
+  warmupReady: boolean;
+  lateRequestCount: number;
+  lateRequestUrls: string[];
 }
 
 interface SceneStateMetric {
@@ -125,6 +132,13 @@ const INITIAL_TELEMETRY: TelemetryMetric = {
   startupTimeMs: null,
   safeModeReason: null,
   tier: null,
+  startupPhase: null,
+  assetProgress: 0,
+  warmupProgress: 0,
+  assetManifestReady: false,
+  warmupReady: false,
+  lateRequestCount: 0,
+  lateRequestUrls: [],
 };
 
 const INITIAL_SCENE_STATE: SceneStateMetric = {

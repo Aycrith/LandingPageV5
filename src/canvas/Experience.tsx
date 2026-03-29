@@ -8,6 +8,7 @@ import { SceneManager } from "./SceneManager";
 import { CameraRig } from "./camera/CameraRig";
 import { PostProcessingStack } from "./postfx/PostProcessingStack";
 import { StartupReadinessGate } from "./StartupReadinessGate";
+import { SceneStartupController } from "./SceneStartupController";
 import { ViewportAuditProbe } from "./ViewportAuditProbe";
 import { PostFxErrorBoundary } from "./CanvasErrorBoundary";
 import { ACT_VIEWPORT_PROFILES } from "./viewportProfiles";
@@ -29,7 +30,6 @@ const STARTUP_PROFILE = ACT_VIEWPORT_PROFILES[0];
 export default function Experience() {
   const caps = useCapsStore((s) => s.caps);
   const setCaps = useCapsStore((s) => s.setCaps);
-  const resetStartup = useSceneLoadStore((s) => s.resetStartup);
   const resetViewportAudit = useViewportAuditStore((s) => s.reset);
   const startupStartedAt = useSceneLoadStore((s) => s.startupStartedAt);
   const startupProgress = useSceneLoadStore(getSceneStartupProgress);
@@ -39,10 +39,9 @@ export default function Experience() {
   useEffect(() => {
     const detected = detectCapabilities();
     setCaps(detected);
-    resetStartup();
     resetViewportAudit();
     useUIStore.getState().setLoadProgress(0);
-  }, [resetStartup, resetViewportAudit, setCaps]);
+  }, [resetViewportAudit, setCaps]);
 
   useEffect(() => {
     useUIStore.getState().setLoadProgress(startupProgress);
@@ -58,6 +57,7 @@ export default function Experience() {
     );
 
     const timer = window.setTimeout(() => {
+      useSceneLoadStore.getState().markStartupReady();
       useUIStore.getState().setLoadProgress(1);
       useUIStore.getState().setReady();
     }, remaining);
@@ -71,6 +71,24 @@ export default function Experience() {
       new URLSearchParams(window.location.search).get("debug") === "1",
     []
   );
+  const safeModeRequested = useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    const search = new URLSearchParams(window.location.search);
+    return search.get("safeMode") === "1" || window.localStorage.getItem("lpv5-safe-mode") === "1";
+  }, []);
+
+  useEffect(() => {
+    if ((!hasFallbackTriggered && !safeModeRequested) || !caps) {
+      return;
+    }
+
+    useSceneLoadStore.getState().markStartupReady();
+    useUIStore.getState().setLoadProgress(1);
+    useUIStore.getState().setReady();
+  }, [caps, hasFallbackTriggered, safeModeRequested]);
 
   if (!caps) return null;
 
@@ -102,6 +120,7 @@ export default function Experience() {
           }
         }}
       >
+        <SceneStartupController />
         <StartupReadinessGate />
         <ViewportAuditProbe />
         {process.env.NODE_ENV === "development" && <SceneDigest />}

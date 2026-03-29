@@ -26,23 +26,31 @@ function analyze() {
     const progress = (data.progress * 100).toFixed(0) + '%';
     const activeAct = data.scroll?.activeAct ?? 'Unknown';
     
+    const renderer =
+      data.auditMetrics?.renderPipeline?.renderer ?? data.renderer ?? null;
+    const lateRequestCount = data.auditMetrics?.telemetry?.lateRequestCount ?? 0;
+
     const analysis = {
       frame,
       progress,
       activeAct,
-      calls: data.gl.render.calls,
-      triangles: data.gl.render.triangles,
+      calls: renderer?.calls ?? 0,
+      triangles: renderer?.triangles ?? 0,
       warnings: [],
       overdrawRisk: 0,
-      orphanMeshes: 0
+      orphanMeshes: 0,
+      lateRequestCount,
     };
 
     // Check raw GL stats
-    if (data.gl.render.calls > DRAW_CALL_THRESHOLD) {
-      analysis.warnings.push(`High draw calls: ${data.gl.render.calls}`);
+    if ((renderer?.calls ?? 0) > DRAW_CALL_THRESHOLD) {
+      analysis.warnings.push(`High draw calls: ${renderer.calls}`);
     }
-    if (data.gl.render.triangles > TRIANGLE_THRESHOLD) {
-      analysis.warnings.push(`High vertex count: ${data.gl.render.triangles.toLocaleString()}`);
+    if ((renderer?.triangles ?? 0) > TRIANGLE_THRESHOLD) {
+      analysis.warnings.push(`High vertex count: ${renderer.triangles.toLocaleString()}`);
+    }
+    if (lateRequestCount > 0) {
+      analysis.warnings.push(`Late startup requests detected: ${lateRequestCount}`);
     }
 
     // Analyze meshes for transparency/overdraw
@@ -75,6 +83,7 @@ function analyze() {
     md += `### Frame ${r.frame} — Scroll: ${r.progress} (Act ${r.activeAct})\n`;
     md += `- **Draw calls**: ${r.calls}\n`;
     md += `- **Triangles**: ${r.triangles.toLocaleString()}\n`;
+    md += `- **Late startup requests**: ${r.lateRequestCount}\n`;
     if (r.warnings.length > 0) {
       r.warnings.forEach(w => md += `- ⚠️ **${w}**\n`);
     } else {

@@ -125,12 +125,8 @@ export function WarpDriveBackground({
   const resVec = useMemo(() => new THREE.Vector2(1920, 1080), []);
   const mouseVec = useMemo(() => new THREE.Vector2(0.5, 0.5), []);
 
-  if (!enabled) {
-    return null;
-  }
-
   useFrame((state) => {
-    if (!matRef.current) return;
+    if (!enabled || !matRef.current) return;
     matRef.current.iTime = state.clock.elapsedTime;
     resVec.set(state.size.width, state.size.height);
     matRef.current.iResolution = resVec;
@@ -140,6 +136,10 @@ export function WarpDriveBackground({
     // Fade in with act progress
     matRef.current.uOpacity = Math.min(progress / 0.3, 1) * 0.85 * opacityScale;
   });
+
+  if (!enabled) {
+    return null;
+  }
 
   return (
     <mesh position={[0, 0, -18]} scale={[32, 18, 1]}>

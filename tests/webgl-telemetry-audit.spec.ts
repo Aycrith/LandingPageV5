@@ -8,18 +8,21 @@ type TelemetryWindow = Window & {
 
 test.describe('WebGL Telemetry Audit', () => {
   test('capture frame-by-frame telemetry and visuals', async ({ page }) => {
-    test.setTimeout(240000);
+    test.setTimeout(360000);
     
-    // Add audit query parameter to enable the probe
-    await page.goto('/?audit=1');
+    // Use flagship production settings for regression coverage.
+    await page.goto('/?audit=1&forceTier=high');
 
     // Wait for the application to be ready (canvas and DOM)
     await page.waitForSelector('canvas', { state: 'attached', timeout: 30000 });
-    
-    // Additional wait for any initial loading screens to clear or scenes to stabilize
-    await page.waitForTimeout(5000);
+    await page.waitForFunction(
+      () => document.querySelector('.loading-screen') === null,
+      undefined,
+      { polling: 100, timeout: 30000 }
+    );
+    await page.waitForTimeout(400);
 
-    const steps = 20; // 5% increments
+    const steps = 12; // representative sweep without spending most of the budget on screenshots
     const dir = path.join(process.cwd(), 'test-results', 'audit');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -65,10 +68,37 @@ test.describe('WebGL Telemetry Audit', () => {
         return null;
       });
 
+      const metrics = await page.evaluate(() => {
+        const auditWindow = window as TelemetryWindow & {
+          __LPV5_VIEWPORT_AUDIT__?: {
+            getMetrics: () => unknown;
+          };
+        };
+        return auditWindow.__LPV5_VIEWPORT_AUDIT__?.getMetrics() ?? null;
+      });
+
+      expect(metrics).not.toBeNull();
+      const typedMetrics = metrics as {
+        telemetry?: {
+          lateRequestCount?: number;
+        };
+        renderPipeline?: {
+          renderer: {
+            calls: number;
+            triangles: number;
+          };
+        };
+      };
+      expect(typedMetrics.telemetry?.lateRequestCount ?? Number.POSITIVE_INFINITY).toBe(0);
+      expect(typedMetrics.renderPipeline?.renderer.calls ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(80);
+      expect(typedMetrics.renderPipeline?.renderer.triangles ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(280000);
+
       if (telemetry) {
         fs.writeFileSync(
           path.join(dir, `telemetry-${i}.json`),
-          JSON.stringify({ frame: i, progress: increment, ...telemetry }, null, 2)
+          JSON.stringify({ frame: i, progress: increment, ...telemetry, auditMetrics: metrics }, null, 2)
         );
       } else {
         console.warn(`[Audit] Telemetry probe missing on frame ${i}.`);

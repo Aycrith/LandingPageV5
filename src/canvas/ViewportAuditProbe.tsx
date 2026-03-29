@@ -3,9 +3,14 @@
 import { useEffect, useEffectEvent, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { addAfterEffect, addEffect, useThree } from "@react-three/fiber";
+import { STARTUP_INTERACTIVE_ASSET_PATHS } from "./assetManifest";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { useCapsStore } from "@/stores/capsStore";
-import { useSceneLoadStore } from "@/stores/sceneLoadStore";
+import {
+  getSceneStartupPhase,
+  getSceneWarmupProgress,
+  useSceneLoadStore,
+} from "@/stores/sceneLoadStore";
 import { useScrollStore } from "@/stores/scrollStore";
 import { evaluateRenderBudget } from "@/lib/scene";
 
@@ -202,6 +207,33 @@ function collectMeshSnapshot(scene: THREE.Scene) {
   return { meshes, composition };
 }
 
+function collectLateStartupRequests(
+  readyAt: number | null,
+  trackedPaths: readonly string[]
+) {
+  if (readyAt == null || typeof performance.getEntriesByType !== "function") {
+    return [];
+  }
+
+  const readyAtPerformanceMs = Math.max(readyAt - performance.timeOrigin, 0);
+  const trackedPathSet = new Set(trackedPaths);
+
+  return performance
+    .getEntriesByType("resource")
+    .flatMap((entry) => {
+      if (!(entry instanceof PerformanceResourceTiming)) {
+        return [];
+      }
+
+      const pathname = new URL(entry.name).pathname;
+      return trackedPathSet.has(pathname) && entry.startTime > readyAtPerformanceMs
+        ? [pathname]
+        : [];
+    })
+    .filter((pathname, index, list) => list.indexOf(pathname) === index)
+    .sort();
+}
+
 export function ViewportAuditProbe() {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
@@ -216,6 +248,9 @@ export function ViewportAuditProbe() {
   const frameStartRef = useRef(0);
   const lastFrameAtRef = useRef<number | null>(null);
   const frameCountRef = useRef(0);
+  const lateRequestScanFrameRef = useRef(-1);
+  const lateRequestReadyAtRef = useRef<number | null>(null);
+  const lateRequestUrlsRef = useRef<string[]>([]);
   const latestRendererRef = useRef<RendererSnapshot>({
     frame: 0,
     calls: 0,
@@ -245,10 +280,30 @@ export function ViewportAuditProbe() {
 
     const loadState = useSceneLoadStore.getState();
     const capsState = useCapsStore.getState();
+    const loadedAssets = Object.values(loadState.criticalAssets).filter(Boolean).length;
+    const assetProgress =
+      loadedAssets / Math.max(Object.keys(loadState.criticalAssets).length, 1);
+    const warmupProgress = getSceneWarmupProgress(loadState);
+    const shouldRescanLateRequests =
+      loadState.readyAt !== lateRequestReadyAtRef.current ||
+      lateRequestUrlsRef.current.length === 0 ||
+      frameCountRef.current - lateRequestScanFrameRef.current >= PUBLISH_EVERY_FRAMES;
+    if (shouldRescanLateRequests) {
+      lateRequestUrlsRef.current = collectLateStartupRequests(
+        loadState.readyAt,
+        STARTUP_INTERACTIVE_ASSET_PATHS
+      );
+      lateRequestReadyAtRef.current = loadState.readyAt;
+      lateRequestScanFrameRef.current = frameCountRef.current;
+      useSceneLoadStore.getState().reportLateRequests(lateRequestUrlsRef.current);
+    }
+    const lateRequestUrls = lateRequestUrlsRef.current;
     useViewportAuditStore.getState().reportTelemetry({
       hasFallbackTriggered: loadState.hasFallbackTriggered,
-      startupTimeMs: loadState.stableFrameReady
-        ? Date.now() - loadState.startupStartedAt
+      startupTimeMs: loadState.readyAt != null
+        ? loadState.readyAt - loadState.startupStartedAt
+        : loadState.stableFrameReady
+          ? Date.now() - loadState.startupStartedAt
         : null,
       safeModeReason: (() => {
         if (typeof window === "undefined") return null;
@@ -262,6 +317,13 @@ export function ViewportAuditProbe() {
         return null;
       })(),
       tier: capsState.caps?.tier ?? null,
+      startupPhase: getSceneStartupPhase(loadState),
+      assetProgress,
+      warmupProgress,
+      assetManifestReady: loadState.assetManifestReady,
+      warmupReady: loadState.warmupReady,
+      lateRequestCount: lateRequestUrls.length,
+      lateRequestUrls,
     });
   });
 
