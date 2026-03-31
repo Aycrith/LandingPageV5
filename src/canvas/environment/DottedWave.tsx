@@ -3,6 +3,7 @@
 import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { getActWeight, isActVisible, useWorldMotionRef } from "@/canvas/worldMotion";
 
 // Dotted Surface port — oscillating point grid
 const COLS = 40;
@@ -11,12 +12,19 @@ const SEPARATION = 0.4;
 const COUNT = COLS * ROWS;
 
 interface DottedWaveProps {
-  progress: number;
+  actIndex: number;
   color?: string;
   yOffset?: number;
+  enabled?: boolean;
 }
 
-export function DottedWave({ progress, color = "#d0a2ff", yOffset = -2.5 }: DottedWaveProps) {
+export function DottedWave({
+  actIndex,
+  color = "#d0a2ff",
+  yOffset = -2.5,
+  enabled = true,
+}: DottedWaveProps) {
+  const motionRef = useWorldMotionRef();
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorObj = useMemo(() => new THREE.Color(color), [color]);
@@ -46,7 +54,9 @@ export function DottedWave({ progress, color = "#d0a2ff", yOffset = -2.5 }: Dott
   }, [colorObj]);
 
   useFrame((state) => {
-    if (!meshRef.current) return;
+    const motion = motionRef.current;
+    const progress = getActWeight(motion, actIndex);
+    if (!enabled || !meshRef.current || !isActVisible(motion, actIndex)) return;
     const t = state.clock.elapsedTime;
     const amplitude = Math.min(progress / 0.4, 1) * 0.35;
 
@@ -61,6 +71,10 @@ export function DottedWave({ progress, color = "#d0a2ff", yOffset = -2.5 }: Dott
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
   });
+
+  if (!enabled) {
+    return null;
+  }
 
   return (
     <instancedMesh

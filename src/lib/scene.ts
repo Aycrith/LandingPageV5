@@ -22,12 +22,16 @@ export interface RenderBudgetSnapshot {
   score: number;
   within: {
     frameTime: boolean;
+    scrollLatency: boolean;
     drawCalls: boolean;
     triangles: boolean;
     geometries: boolean;
     textures: boolean;
+    textureMemory: boolean;
     programs: boolean;
     points: boolean;
+    jsHeap: boolean;
+    longTasks: boolean;
     loadTime: boolean;
   };
   violations: string[];
@@ -161,11 +165,19 @@ export function fitScaleToViewportFill({
 export function evaluateRenderBudget({
   budgets,
   meanDeltaMs,
+  p95ScrollLatencyMs,
+  textureMemoryMB,
+  jsHeapMB,
+  longTaskCount,
   renderer,
   startupTimeMs,
 }: {
   budgets: Budgets;
   meanDeltaMs: number;
+  p95ScrollLatencyMs: number;
+  textureMemoryMB: number;
+  jsHeapMB: number | null;
+  longTaskCount: number;
   renderer: {
     calls: number;
     triangles: number;
@@ -179,12 +191,16 @@ export function evaluateRenderBudget({
   const estimatedFps = meanDeltaMs > 0 ? 1000 / meanDeltaMs : budgets.fps;
   const within = {
     frameTime: meanDeltaMs <= budgets.frameTimeMs,
+    scrollLatency: p95ScrollLatencyMs <= budgets.scrollLatencyMs,
     drawCalls: renderer.calls <= budgets.drawCalls,
     triangles: renderer.triangles <= budgets.triangles,
     geometries: renderer.geometries <= budgets.geometries,
     textures: renderer.textures <= budgets.textures,
+    textureMemory: textureMemoryMB <= budgets.textureMemoryMB,
     programs: renderer.programs <= budgets.programs,
     points: renderer.points <= budgets.points,
+    jsHeap: jsHeapMB == null || jsHeapMB <= budgets.jsHeapMB,
+    longTasks: longTaskCount <= budgets.maxLongTasks,
     loadTime: startupTimeMs == null || startupTimeMs <= budgets.loadTimeMs,
   };
 

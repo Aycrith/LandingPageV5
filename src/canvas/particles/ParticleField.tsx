@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useScrollStore } from "@/stores/scrollStore";
 import { useCapsStore } from "@/stores/capsStore";
+import { useSceneLoadStore } from "@/stores/sceneLoadStore";
 import { useMouseParallax } from "@/hooks/useMouseParallax";
 import vertexShader from "@/canvas/shaders/particles.vert.glsl";
 import fragmentShader from "@/canvas/shaders/particles.frag.glsl";
@@ -37,6 +38,9 @@ export function ParticleField({ mode }: ParticleFieldProps) {
   const materialRef = useRef<THREE.ShaderMaterial>(null);
   const mouse = useMouseParallax();
   const caps = useCapsStore((s) => s.caps);
+  const warmupActIndex = useSceneLoadStore((state) => state.warmupActIndex);
+  const warmupActProgress = useSceneLoadStore((state) => state.warmupActProgress);
+  const warmupReady = useSceneLoadStore((state) => state.warmupReady);
 
   const count = caps?.maxParticles ?? 50000;
 
@@ -120,7 +124,11 @@ export function ParticleField({ mode }: ParticleFieldProps) {
   useFrame((state) => {
     if (!materialRef.current) return;
 
-    const { activeAct, actProgress, velocity } = useScrollStore.getState();
+    const { activeAct: scrollActiveAct, actProgress: scrollActProgress, velocity } =
+      useScrollStore.getState();
+    const isWarmupMount = !warmupReady && warmupActIndex != null;
+    const activeAct = isWarmupMount ? warmupActIndex! : scrollActiveAct;
+    const actProgress = isWarmupMount ? warmupActProgress : scrollActProgress;
     const nextAct = Math.min(activeAct + 1, ACT_ACCENT_COLORS.length - 1);
 
     materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;

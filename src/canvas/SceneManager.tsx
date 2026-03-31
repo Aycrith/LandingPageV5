@@ -11,7 +11,6 @@ import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { SeamlessWorld } from "./SeamlessWorld";
 import { resolveMountedActs } from "./runtimeMounting";
 import { WORLD_PHASES, type AmbientParticleMode, type WorldPhaseProfile } from "./viewportProfiles";
-import { tupleToVector3 } from "@/lib/scene";
 import { computeCrossfadeBlend } from "@/lib/transition";
 
 function resolveAmbientParticleMode(
@@ -37,44 +36,60 @@ export function SceneManager() {
   const practicalLightRef = useRef<THREE.PointLight>(null);
 
   const activeAct = useScrollStore((state) => state.activeAct);
-  const actProgress = useScrollStore((state) => state.actProgress);
   const caps = useCapsStore((state) => state.caps);
   const warmupActIndex = useSceneLoadStore((state) => state.warmupActIndex);
   const warmupReady = useSceneLoadStore((state) => state.warmupReady);
+  const environmentReady = useSceneLoadStore(
+    (state) => state.loadedAssets["environment-kloppenheim"] ?? false
+  );
   const tier = caps?.tier ?? "low";
-  const isWarmupMount = false;
-  const resolvedActiveAct = activeAct;
-  const currentProfile = WORLD_PHASES[resolvedActiveAct];
-  const nextAct = nextPhaseIndex(activeAct);
-  const nextProfile = WORLD_PHASES[nextAct];
-  const effectiveActProgress = actProgress;
-  const rebirthBlend =
-    activeAct === WORLD_PHASES.length - 1
-      ? THREE.MathUtils.smoothstep(
-          actProgress,
-          currentProfile.transitionRig.rebirth,
-          1
-        )
-      : 0;
-  const activeHeroLabel =
-    rebirthBlend > 0.45 ? nextProfile.heroLabel : currentProfile.heroLabel;
-  const activeHeroAsset =
-    rebirthBlend > 0.45 ? nextProfile.heroAsset : currentProfile.heroAsset;
-  const mountedActs = useMemo(
+  const auditMode = useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return new URLSearchParams(window.location.search).get("audit") === "1";
+  }, []);
+  const environmentMode =
+    tier === "high" && environmentReady
+      ? "hdri-kloppenheim-4k"
+      : tier !== "low"
+        ? "preset-studio"
+        : "disabled";
+  const mountedActLookahead = auditMode ? 0 : 1;
+  const currentProfile = WORLD_PHASES[activeAct];
+  const mountedHeroActs = useMemo(
     () =>
       resolveMountedActs({
         activeAct,
         totalActs: WORLD_PHASES.length,
         warmupActIndex,
         warmupReady,
-        rebirthBlend,
+        lookahead: mountedActLookahead,
       }),
-    [activeAct, rebirthBlend, warmupActIndex, warmupReady]
+    [
+      activeAct,
+      mountedActLookahead,
+      warmupActIndex,
+      warmupReady,
+    ]
   );
-  const ambientParticleMode =
-    rebirthBlend > 0.45
-      ? resolveAmbientParticleMode(nextProfile, tier)
-      : resolveAmbientParticleMode(currentProfile, tier);
+  const mountedFxActs = useMemo(
+    () =>
+      resolveMountedActs({
+        activeAct,
+        totalActs: WORLD_PHASES.length,
+        warmupActIndex,
+        warmupReady,
+        lookahead: mountedActLookahead,
+      }),
+    [
+      activeAct,
+      mountedActLookahead,
+      warmupActIndex,
+      warmupReady,
+    ]
+  );
 
   const fogColor = useMemo(() => new THREE.Color(), []);
   const keyColor = useMemo(() => new THREE.Color(), []);
@@ -83,12 +98,9 @@ export function SceneManager() {
   const fillColor = useMemo(() => new THREE.Color(), []);
   const rimColor = useMemo(() => new THREE.Color(), []);
   const practicalColor = useMemo(() => new THREE.Color(), []);
-  const vectorA = useMemo(() => new THREE.Vector3(), []);
-  const vectorB = useMemo(() => new THREE.Vector3(), []);
-  const vectorC = useMemo(() => new THREE.Vector3(), []);
-  const vectorD = useMemo(() => new THREE.Vector3(), []);
   const vectorFocus = useMemo(() => new THREE.Vector3(), []);
   const scratchColorA = useMemo(() => new THREE.Color(), []);
+  const lastSceneStateKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (keyLightRef.current && keyTargetRef.current) {
@@ -103,28 +115,29 @@ export function SceneManager() {
   // not when caps settle — so prune doesn't wipe heroModels right after heroes
   // start reporting on a new act.
   useEffect(() => {
+    const ambientParticleMode = resolveAmbientParticleMode(currentProfile, tier);
     const audit = useViewportAuditStore.getState();
     audit.reportSceneState({
-      mountedActs,
-      activeHeroLabel,
-      activeHeroAsset,
+      mountedActs: mountedHeroActs,
+      activeHeroLabel: currentProfile.heroLabel,
+      activeHeroAsset: currentProfile.heroAsset,
       overlayMode: currentProfile.overlayMode,
       ambientParticleMode,
     });
-    audit.pruneHeroModels([activeHeroLabel]);
+    audit.pruneHeroModels([currentProfile.heroLabel]);
     audit.pruneFxLayers(
-      !isWarmupMount && activeAct === WORLD_PHASES.length - 1
+      activeAct === WORLD_PHASES.length - 1
         ? ["apotheosis-core"]
         : []
     );
   }, [
     activeAct,
-    activeHeroAsset,
-    activeHeroLabel,
-    ambientParticleMode,
+    currentProfile,
     currentProfile.overlayMode,
-    isWarmupMount,
-    mountedActs,
+    currentProfile.heroAsset,
+    currentProfile.heroLabel,
+    mountedHeroActs,
+    tier,
   ]);
 
   // Lighting pipeline report is safe to re-fire on caps/tier changes because it
@@ -132,12 +145,7 @@ export function SceneManager() {
   useEffect(() => {
     useViewportAuditStore.getState().reportLightingPipeline({
       exposure: currentProfile.lightingRig.exposure,
-      environmentMode:
-        tier === "high"
-          ? "hdri-kloppenheim-4k"
-          : tier === "medium"
-            ? "preset-studio"
-            : "disabled",
+      environmentMode,
       shadowMapSize: tier === "high" && Boolean(caps?.enableShadows) ? 2048 : 0,
       ambientIntensity: currentProfile.lightingRig.ambientIntensity,
       hemisphereIntensity: Math.max(0.08, currentProfile.lightingRig.ambientIntensity * 0.9),
@@ -147,7 +155,6 @@ export function SceneManager() {
       practicalIntensity: currentProfile.lightingRig.practical.intensity,
     });
   }, [
-    activeAct,
     currentProfile.lightingRig.ambientIntensity,
     currentProfile.lightingRig.exposure,
     currentProfile.lightingRig.fill.intensity,
@@ -155,60 +162,120 @@ export function SceneManager() {
     currentProfile.lightingRig.practical.intensity,
     currentProfile.lightingRig.rim.intensity,
     caps?.enableShadows,
+    environmentMode,
+    environmentReady,
     tier,
   ]);
 
   useFrame((state) => {
+    const scrollState = useScrollStore.getState();
+    const frameActiveAct = scrollState.activeAct;
+    const frameCurrentProfile = WORLD_PHASES[frameActiveAct];
+    const frameNextProfile = WORLD_PHASES[nextPhaseIndex(frameActiveAct)];
+    const frameBlend = scrollState.actProgress;
     const blendT = computeCrossfadeBlend(
-      effectiveActProgress,
-      currentProfile.transitionRig
+      frameBlend,
+      frameCurrentProfile.transitionRig
     );
+    const rebirthBlend =
+      frameActiveAct === WORLD_PHASES.length - 1
+        ? THREE.MathUtils.smoothstep(
+            frameBlend,
+            frameCurrentProfile.transitionRig.rebirth,
+            1
+          )
+        : 0;
+    const activeHeroLabel =
+      rebirthBlend > 0.45 ? frameNextProfile.heroLabel : frameCurrentProfile.heroLabel;
+    const activeHeroAsset =
+      rebirthBlend > 0.45 ? frameNextProfile.heroAsset : frameCurrentProfile.heroAsset;
+    const ambientParticleMode =
+      rebirthBlend > 0.45
+        ? resolveAmbientParticleMode(frameNextProfile, tier)
+        : resolveAmbientParticleMode(frameCurrentProfile, tier);
+    const sceneStateKey = [
+      mountedHeroActs.join(","),
+      activeHeroLabel,
+      activeHeroAsset,
+      frameCurrentProfile.overlayMode,
+      ambientParticleMode,
+    ].join("|");
+
+    if (lastSceneStateKeyRef.current !== sceneStateKey) {
+      lastSceneStateKeyRef.current = sceneStateKey;
+      const audit = useViewportAuditStore.getState();
+      audit.reportSceneState({
+        mountedActs: mountedHeroActs,
+        activeHeroLabel,
+        activeHeroAsset,
+        overlayMode: frameCurrentProfile.overlayMode,
+        ambientParticleMode,
+      });
+      audit.pruneHeroModels([activeHeroLabel]);
+      audit.pruneFxLayers(
+        frameActiveAct === WORLD_PHASES.length - 1 ? ["apotheosis-core"] : []
+      );
+    }
 
     fogColor
-      .set(currentProfile.lightingRig.fogColor)
-      .lerp(scratchColorA.set(nextProfile.lightingRig.fogColor), blendT);
+      .set(frameCurrentProfile.lightingRig.fogColor)
+      .lerp(scratchColorA.set(frameNextProfile.lightingRig.fogColor), blendT);
     if (fogRef.current) {
       fogRef.current.color.copy(fogColor);
       fogRef.current.density = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.fogDensity,
-        nextProfile.lightingRig.fogDensity,
+        frameCurrentProfile.lightingRig.fogDensity,
+        frameNextProfile.lightingRig.fogDensity,
         blendT
       );
     }
 
     state.gl.toneMappingExposure = THREE.MathUtils.lerp(
-      currentProfile.lightingRig.exposure,
-      nextProfile.lightingRig.exposure,
+      frameCurrentProfile.lightingRig.exposure,
+      frameNextProfile.lightingRig.exposure,
       blendT
     );
 
     if (ambientRef.current) {
       ambientRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.ambientIntensity,
-        nextProfile.lightingRig.ambientIntensity,
+        frameCurrentProfile.lightingRig.ambientIntensity,
+        frameNextProfile.lightingRig.ambientIntensity,
         blendT
       );
     }
 
     hemiSkyColor
-      .set(currentProfile.accent)
-      .lerp(scratchColorA.set(nextProfile.accent), blendT);
+      .set(frameCurrentProfile.accent)
+      .lerp(scratchColorA.set(frameNextProfile.accent), blendT);
     hemiGroundColor
-      .set(currentProfile.lightingRig.fogColor)
-      .lerp(scratchColorA.set(nextProfile.lightingRig.fogColor), blendT);
+      .set(frameCurrentProfile.lightingRig.fogColor)
+      .lerp(scratchColorA.set(frameNextProfile.lightingRig.fogColor), blendT);
     if (hemisphereRef.current) {
       hemisphereRef.current.color.copy(hemiSkyColor);
       hemisphereRef.current.groundColor.copy(hemiGroundColor);
       hemisphereRef.current.intensity = THREE.MathUtils.lerp(
-        Math.max(0.08, currentProfile.lightingRig.ambientIntensity * 0.9),
-        Math.max(0.08, nextProfile.lightingRig.ambientIntensity * 0.9),
+        Math.max(0.08, frameCurrentProfile.lightingRig.ambientIntensity * 0.9),
+        Math.max(0.08, frameNextProfile.lightingRig.ambientIntensity * 0.9),
         blendT
       );
     }
 
-    vectorFocus
-      .copy(tupleToVector3(currentProfile.worldAnchor))
-      .lerp(tupleToVector3(nextProfile.worldAnchor), blendT);
+    vectorFocus.set(
+      THREE.MathUtils.lerp(
+        frameCurrentProfile.worldAnchor[0],
+        frameNextProfile.worldAnchor[0],
+        blendT
+      ),
+      THREE.MathUtils.lerp(
+        frameCurrentProfile.worldAnchor[1],
+        frameNextProfile.worldAnchor[1],
+        blendT
+      ),
+      THREE.MathUtils.lerp(
+        frameCurrentProfile.worldAnchor[2],
+        frameNextProfile.worldAnchor[2],
+        blendT
+      )
+    );
     if (keyTargetRef.current) {
       keyTargetRef.current.position.copy(vectorFocus);
       keyTargetRef.current.updateMatrixWorld();
@@ -219,75 +286,123 @@ export function SceneManager() {
     }
 
     keyColor
-      .set(currentProfile.lightingRig.key.color)
-      .lerp(scratchColorA.set(nextProfile.lightingRig.key.color), blendT);
+      .set(frameCurrentProfile.lightingRig.key.color)
+      .lerp(scratchColorA.set(frameNextProfile.lightingRig.key.color), blendT);
     if (keyLightRef.current) {
       keyLightRef.current.color.copy(keyColor);
       keyLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.key.intensity,
-        nextProfile.lightingRig.key.intensity,
+        frameCurrentProfile.lightingRig.key.intensity,
+        frameNextProfile.lightingRig.key.intensity,
         blendT
       );
-      keyLightRef.current.position.copy(
-        vectorA
-          .copy(tupleToVector3(currentProfile.lightingRig.key.position))
-          .lerp(tupleToVector3(nextProfile.lightingRig.key.position), blendT)
+      keyLightRef.current.position.set(
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.key.position[0],
+          frameNextProfile.lightingRig.key.position[0],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.key.position[1],
+          frameNextProfile.lightingRig.key.position[1],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.key.position[2],
+          frameNextProfile.lightingRig.key.position[2],
+          blendT
+        )
       );
     }
 
     fillColor
-      .set(currentProfile.lightingRig.fill.color)
-      .lerp(scratchColorA.set(nextProfile.lightingRig.fill.color), blendT);
+      .set(frameCurrentProfile.lightingRig.fill.color)
+      .lerp(scratchColorA.set(frameNextProfile.lightingRig.fill.color), blendT);
     if (fillLightRef.current) {
       fillLightRef.current.color.copy(fillColor);
       fillLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.fill.intensity,
-        nextProfile.lightingRig.fill.intensity,
+        frameCurrentProfile.lightingRig.fill.intensity,
+        frameNextProfile.lightingRig.fill.intensity,
         blendT
       );
-      fillLightRef.current.position.copy(
-        vectorB
-          .copy(tupleToVector3(currentProfile.lightingRig.fill.position))
-          .lerp(tupleToVector3(nextProfile.lightingRig.fill.position), blendT)
+      fillLightRef.current.position.set(
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.fill.position[0],
+          frameNextProfile.lightingRig.fill.position[0],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.fill.position[1],
+          frameNextProfile.lightingRig.fill.position[1],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.fill.position[2],
+          frameNextProfile.lightingRig.fill.position[2],
+          blendT
+        )
       );
     }
 
     rimColor
-      .set(currentProfile.lightingRig.rim.color)
-      .lerp(scratchColorA.set(nextProfile.lightingRig.rim.color), blendT);
+      .set(frameCurrentProfile.lightingRig.rim.color)
+      .lerp(scratchColorA.set(frameNextProfile.lightingRig.rim.color), blendT);
     if (rimLightRef.current) {
       rimLightRef.current.color.copy(rimColor);
       rimLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.rim.intensity,
-        nextProfile.lightingRig.rim.intensity,
+        frameCurrentProfile.lightingRig.rim.intensity,
+        frameNextProfile.lightingRig.rim.intensity,
         blendT
       );
       rimLightRef.current.angle = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.rim.angle,
-        nextProfile.lightingRig.rim.angle,
+        frameCurrentProfile.lightingRig.rim.angle,
+        frameNextProfile.lightingRig.rim.angle,
         blendT
       );
-      rimLightRef.current.position.copy(
-        vectorC
-          .copy(tupleToVector3(currentProfile.lightingRig.rim.position))
-          .lerp(tupleToVector3(nextProfile.lightingRig.rim.position), blendT)
+      rimLightRef.current.position.set(
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.rim.position[0],
+          frameNextProfile.lightingRig.rim.position[0],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.rim.position[1],
+          frameNextProfile.lightingRig.rim.position[1],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.rim.position[2],
+          frameNextProfile.lightingRig.rim.position[2],
+          blendT
+        )
       );
     }
 
     practicalColor
-      .set(currentProfile.lightingRig.practical.color)
-      .lerp(scratchColorA.set(nextProfile.lightingRig.practical.color), blendT);
+      .set(frameCurrentProfile.lightingRig.practical.color)
+      .lerp(scratchColorA.set(frameNextProfile.lightingRig.practical.color), blendT);
     if (practicalLightRef.current) {
       practicalLightRef.current.color.copy(practicalColor);
       practicalLightRef.current.intensity = THREE.MathUtils.lerp(
-        currentProfile.lightingRig.practical.intensity,
-        nextProfile.lightingRig.practical.intensity,
+        frameCurrentProfile.lightingRig.practical.intensity,
+        frameNextProfile.lightingRig.practical.intensity,
         blendT
       );
-      practicalLightRef.current.position.copy(
-        vectorD
-          .copy(tupleToVector3(currentProfile.lightingRig.practical.position))
-          .lerp(tupleToVector3(nextProfile.lightingRig.practical.position), blendT)
+      practicalLightRef.current.position.set(
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.practical.position[0],
+          frameNextProfile.lightingRig.practical.position[0],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.practical.position[1],
+          frameNextProfile.lightingRig.practical.position[1],
+          blendT
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.lightingRig.practical.position[2],
+          frameNextProfile.lightingRig.practical.position[2],
+          blendT
+        )
       );
     }
   });
@@ -358,17 +473,19 @@ export function SceneManager() {
       />
 
       <Suspense fallback={null}>
-        {tier === "high" ? (
+        {environmentMode === "hdri-kloppenheim-4k" ? (
           <Environment files="/env/hdri/kloppenheim_07_4k.exr" background={false} />
-        ) : tier === "medium" ? (
+        ) : environmentMode === "preset-studio" ? (
           <Environment preset="studio" background={false} />
         ) : null}
       </Suspense>
 
       <SeamlessWorld
-        activeAct={activeAct}
-        phaseBlend={actProgress}
+        mountedHeroActIndices={mountedHeroActs}
+        mountedFxActIndices={mountedFxActs}
         tier={tier}
+        includeActFx={!auditMode}
+        showAmbientParticles={!auditMode}
       />
     </>
   );

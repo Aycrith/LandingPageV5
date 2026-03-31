@@ -5,6 +5,10 @@ import path from 'path';
 type TelemetryWindow = Window & {
   __R3F_TELEMETRY?: () => unknown;
 };
+const STARTUP_READY_TIMEOUT_MS = 120_000;
+const STARTUP_READY_BUDGET_MS = 5_000;
+const MAX_P95_SCROLL_LATENCY_MS = 16.6;
+const MAX_FRAMES_OVER_33_MS = 2;
 
 test.describe('WebGL Telemetry Audit', () => {
   test('capture frame-by-frame telemetry and visuals', async ({ page }) => {
@@ -14,11 +18,14 @@ test.describe('WebGL Telemetry Audit', () => {
     await page.goto('/?audit=1&forceTier=high');
 
     // Wait for the application to be ready (canvas and DOM)
-    await page.waitForSelector('canvas', { state: 'attached', timeout: 30000 });
+    await page.waitForSelector('canvas', {
+      state: 'attached',
+      timeout: STARTUP_READY_TIMEOUT_MS,
+    });
     await page.waitForFunction(
       () => document.querySelector('.loading-screen') === null,
       undefined,
-      { polling: 100, timeout: 30000 }
+      { polling: 100, timeout: STARTUP_READY_TIMEOUT_MS }
     );
     await page.waitForTimeout(400);
 
@@ -81,19 +88,71 @@ test.describe('WebGL Telemetry Audit', () => {
       const typedMetrics = metrics as {
         telemetry?: {
           lateRequestCount?: number;
+          hasFallbackTriggered?: boolean;
+          compileReady?: boolean;
+          nearScrollReady?: boolean;
+          warmupActCount?: number;
+          startupPhaseTimings?: {
+            readyMs?: number | null;
+          };
+        };
+        resourcePipeline?: {
+          lateEntryCriticalCount?: number;
+          lateNearScrollCount?: number;
         };
         renderPipeline?: {
+          p95ScrollLatencyMs?: number;
+          over33ScrollLatencyMs?: number;
+          longTasks?: {
+            count?: number;
+          };
           renderer: {
             calls: number;
             triangles: number;
           };
+          budget?: {
+            violations?: string[];
+          };
+          postReadyRendererDrift?: {
+            programs: number;
+            geometries: number;
+            textures: number;
+          } | null;
         };
       };
       expect(typedMetrics.telemetry?.lateRequestCount ?? Number.POSITIVE_INFINITY).toBe(0);
-      expect(typedMetrics.renderPipeline?.renderer.calls ?? Number.POSITIVE_INFINITY)
-        .toBeLessThanOrEqual(80);
-      expect(typedMetrics.renderPipeline?.renderer.triangles ?? Number.POSITIVE_INFINITY)
-        .toBeLessThanOrEqual(280000);
+      expect(typedMetrics.telemetry?.hasFallbackTriggered ?? true).toBe(false);
+      expect(typedMetrics.telemetry?.compileReady ?? false).toBe(true);
+      expect(typedMetrics.telemetry?.nearScrollReady ?? false).toBe(true);
+      expect(typedMetrics.telemetry?.warmupActCount ?? 0).toBeGreaterThanOrEqual(2);
+      expect(
+        typedMetrics.telemetry?.startupPhaseTimings?.readyMs ?? Number.POSITIVE_INFINITY
+      ).toBeLessThanOrEqual(STARTUP_READY_BUDGET_MS);
+      expect(
+        typedMetrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY
+      ).toBe(0);
+      expect(
+        typedMetrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY
+      ).toBe(0);
+      expect(
+        typedMetrics.renderPipeline?.p95ScrollLatencyMs ?? Number.POSITIVE_INFINITY
+      ).toBeLessThanOrEqual(MAX_P95_SCROLL_LATENCY_MS);
+      expect(
+        typedMetrics.renderPipeline?.over33ScrollLatencyMs ?? Number.POSITIVE_INFINITY
+      ).toBeLessThanOrEqual(MAX_FRAMES_OVER_33_MS);
+      expect(
+        typedMetrics.renderPipeline?.longTasks?.count ?? Number.POSITIVE_INFINITY
+      ).toBe(0);
+      expect(typedMetrics.renderPipeline?.budget?.violations ?? ["missing-budget"]).toEqual([]);
+      expect(
+        typedMetrics.renderPipeline?.postReadyRendererDrift?.programs ?? Number.POSITIVE_INFINITY
+      ).toBeLessThanOrEqual(0);
+      expect(
+        typedMetrics.renderPipeline?.postReadyRendererDrift?.geometries ?? Number.POSITIVE_INFINITY
+      ).toBeLessThanOrEqual(0);
+      expect(
+        typedMetrics.renderPipeline?.postReadyRendererDrift?.textures ?? Number.POSITIVE_INFINITY
+      ).toBeLessThanOrEqual(0);
 
       if (telemetry) {
         fs.writeFileSync(

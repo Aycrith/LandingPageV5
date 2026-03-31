@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
 import { shaderMaterial } from "@react-three/drei";
-import * as THREE from "three";
+import { getActWeight, isActVisible, useWorldMotionRef } from "@/canvas/worldMotion";
 
 const GradientBlurShaderMaterial = shaderMaterial(
   {
@@ -64,18 +64,29 @@ declare module "@react-three/fiber" {
 }
 
 interface GradientBlurBgProps {
-  progress: number;
+  actIndex: number;
+  enabled?: boolean;
 }
 
-export function GradientBlurBg({ progress }: GradientBlurBgProps) {
+export function GradientBlurBg({
+  actIndex,
+  enabled = true,
+}: GradientBlurBgProps) {
+  const motionRef = useWorldMotionRef();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
 
   useFrame((state) => {
-    if (!matRef.current) return;
+    const motion = motionRef.current;
+    const progress = getActWeight(motion, actIndex);
+    if (!enabled || !matRef.current || !isActVisible(motion, actIndex)) return;
     matRef.current.uTime = state.clock.elapsedTime;
     matRef.current.uOpacity = Math.min(progress / 0.3, 1) * 0.9;
   });
+
+  if (!enabled) {
+    return null;
+  }
 
   return (
     <mesh position={[0, 0, -10]} scale={[30, 15, 1]}>

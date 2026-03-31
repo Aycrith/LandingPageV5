@@ -5,15 +5,17 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
+import { getActWeight, useWorldMotionRef } from "@/canvas/worldMotion";
 
-interface ActProps {
-  progress: number;
-  visible: boolean;
-}
-
+const ACT_INDEX = 0;
 const ACT_PROFILE = ACT_VIEWPORT_PROFILES[0];
 
-export function Act1Emergence({ progress, visible }: ActProps) {
+export function Act1Emergence({
+  auditEnabled = true,
+}: {
+  auditEnabled?: boolean;
+}) {
+  const motionRef = useWorldMotionRef();
   const groupRef = useRef<THREE.Group>(null);
   const coreRef = useRef<THREE.Mesh>(null);
   const coreMaterialRef = useRef<THREE.MeshPhysicalMaterial>(null);
@@ -22,15 +24,24 @@ export function Act1Emergence({ progress, visible }: ActProps) {
   const accretionPrimaryRef = useRef<THREE.Mesh>(null);
   const accretionSecondaryRef = useRef<THREE.Mesh>(null);
   const lensRef = useRef<THREE.Mesh>(null);
+  const pointLightRef = useRef<THREE.PointLight>(null);
+  const spotLightRef = useRef<THREE.SpotLight>(null);
 
   useEffect(() => {
+    if (!auditEnabled) {
+      return;
+    }
     return () => {
       useViewportAuditStore.getState().clearFxLayer("act1-glow");
     };
-  }, []);
+  }, [auditEnabled]);
 
   useFrame((state) => {
-    if (!visible || !groupRef.current) return;
+    if (!groupRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    groupRef.current.visible = visible;
+    if (!visible) return;
     const t = state.clock.elapsedTime;
 
     groupRef.current.position.y = -0.2 - progress * 0.45;
@@ -64,10 +75,12 @@ export function Act1Emergence({ progress, visible }: ActProps) {
         Math.min(progress / 0.6, 1)
       );
       glowMaterialRef.current.opacity = glowOpacity;
-      useViewportAuditStore.getState().reportFxLayer("act1-glow", {
-        opacity: glowOpacity,
-        scale: glowRef.current?.scale.x,
-      });
+      if (auditEnabled) {
+        useViewportAuditStore.getState().reportFxLayer("act1-glow", {
+          opacity: glowOpacity,
+          scale: glowRef.current?.scale.x,
+        });
+      }
     }
 
     if (accretionPrimaryRef.current) {
@@ -94,12 +107,16 @@ export function Act1Emergence({ progress, visible }: ActProps) {
 
     const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
     groupRef.current.visible = fadeOut > 0.01;
+    if (pointLightRef.current) {
+      pointLightRef.current.intensity = progress * 18;
+    }
+    if (spotLightRef.current) {
+      spotLightRef.current.intensity = progress * 10;
+    }
   });
 
-  if (!visible) return null;
-
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} visible={false}>
       <mesh ref={coreRef}>
         <icosahedronGeometry args={[1, 4]} />
         <meshPhysicalMaterial
@@ -169,17 +186,19 @@ export function Act1Emergence({ progress, visible }: ActProps) {
       </mesh>
 
       <pointLight
+        ref={pointLightRef}
         color="#7ef2c6"
-        intensity={progress * 18}
+        intensity={0}
         distance={28}
         decay={2}
       />
 
       <spotLight
+        ref={spotLightRef}
         position={[0, 4, -4]}
         target-position={[0, 0, 0]}
         color="#d7fff1"
-        intensity={progress * 10}
+        intensity={0}
         angle={Math.PI / 4.5}
         penumbra={1}
         distance={30}

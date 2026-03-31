@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
 import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
+import { getActWeight, isActVisible, useWorldMotionRef } from "@/canvas/worldMotion";
 
 // Shader Lines — mosaic sliding lines converging toward focal point (Act5)
 const ShaderLinesMaterial = shaderMaterial(
@@ -62,19 +63,22 @@ declare module "@react-three/fiber" {
 }
 
 interface ShaderLinesFieldProps {
-  progress: number;
+  actIndex: number;
   enabled?: boolean;
 }
 
 export function ShaderLinesField({
-  progress,
+  actIndex,
   enabled = true,
 }: ShaderLinesFieldProps) {
+  const motionRef = useWorldMotionRef();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
 
   useFrame((state) => {
-    if (!enabled || !matRef.current) return;
+    const motion = motionRef.current;
+    const progress = getActWeight(motion, actIndex);
+    if (!enabled || !matRef.current || !isActVisible(motion, actIndex)) return;
     matRef.current.uTime = state.clock.elapsedTime;
     matRef.current.uIntensity = Math.min(progress / 0.5, 1);
   });

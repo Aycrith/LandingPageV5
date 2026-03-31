@@ -6,6 +6,7 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   transpilePackages: ["three"],
+  outputFileTracingRoot: projectRoot,
   turbopack: {
     root: projectRoot,
     rules: {
@@ -15,7 +16,7 @@ const nextConfig: NextConfig = {
       "*.frag": { loaders: ["raw-loader"], as: "*.js" },
     },
   },
-  webpack: (config) => {
+  webpack: (config: { module: { rules: Array<Record<string, unknown>> } }) => {
     config.module.rules.push({
       test: /\.(glsl|wgsl|vert|frag)$/,
       type: "asset/source",

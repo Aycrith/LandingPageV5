@@ -4,58 +4,46 @@ import { Suspense, useEffect, useLayoutEffect, useMemo } from "react";
 import { useEnvironment, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import {
-  STARTUP_BACKGROUND_PRELOAD_GROUPS,
-  STARTUP_BACKGROUND_TEXTURE_PRELOADS,
-  STARTUP_CRITICAL_ASSET_IDS,
-  STARTUP_INTERACTIVE_ASSET_PATHS,
-  STARTUP_INTERACTIVE_PRELOAD_GROUPS,
-  STARTUP_INTERACTIVE_TEXTURE_PRELOADS,
-  STARTUP_WARMUP_ACT_SEQUENCE,
+  ENTRY_WARMUP_ACT_SEQUENCE,
+  STARTUP_DEFERRED_PRELOAD_GROUPS,
+  STARTUP_DEFERRED_TEXTURE_PRELOADS,
+  STARTUP_ENTRY_CRITICAL_PRELOAD_GROUPS,
+  STARTUP_ENTRY_CRITICAL_TEXTURE_PRELOADS,
+  STARTUP_NEAR_SCROLL_PRELOAD_GROUPS,
+  STARTUP_NEAR_SCROLL_TEXTURE_PRELOADS,
+  resolveTextureVariantUrl,
   type StartupAssetId,
-  type StartupCriticalAsset,
 } from "./assetManifest";
+import { getEffectiveStartupAssetIdsForStage } from "./startupAssetPolicy";
+import {
+  DEFERRED_WARMUP_CHECKPOINT_QUEUE,
+} from "./warmupCheckpoints";
 import {
   getTextureSamplingOptions,
   resolveActMaterialTierConfig,
 } from "./acts/materialTierConfig";
 import { useCapsStore } from "@/stores/capsStore";
 import { useSceneLoadStore } from "@/stores/sceneLoadStore";
-import { preloadRepeatingTexture, useRepeatingTexture } from "@/lib/textures";
+import { useScrollStore } from "@/stores/scrollStore";
+import { useOptionalRepeatingTexture } from "@/lib/textures";
 
-const WARMUP_FRAME_COUNT = 1;
-const WARMUP_FRAME_WAIT_CAP_MS = 180;
-const WARMUP_SETTLE_MS = 120;
-
-function collectLoadedManifestPaths() {
-  if (typeof performance.getEntriesByType !== "function") {
-    return new Set<string>();
-  }
-
-  return new Set(
-    performance
-      .getEntriesByType("resource")
-      .flatMap((entry) => {
-        if (!(entry instanceof PerformanceResourceTiming)) {
-          return [];
-        }
-
-        const pathname = new URL(entry.name, window.location.href).pathname;
-        return entry.responseEnd > 0 ? [pathname] : [];
-      })
-  );
-}
-
-function waitForManifestRequests(timeoutMs: number) {
+function waitForLoadedAssets(
+  assetIds: readonly StartupAssetId[],
+  timeoutMs: number
+) {
   return new Promise<void>((resolve, reject) => {
+    if (assetIds.length === 0) {
+      resolve();
+      return;
+    }
+
     const startedAt = performance.now();
 
     function tick() {
-      const loadedPaths = collectLoadedManifestPaths();
-      const missingPaths = STARTUP_INTERACTIVE_ASSET_PATHS.filter(
-        (pathname) => !loadedPaths.has(pathname)
-      );
+      const { loadedAssets } = useSceneLoadStore.getState();
+      const missingAssets = assetIds.filter((assetId) => !loadedAssets[assetId]);
 
-      if (missingPaths.length === 0) {
+      if (missingAssets.length === 0) {
         resolve();
         return;
       }
@@ -63,98 +51,165 @@ function waitForManifestRequests(timeoutMs: number) {
       if (performance.now() - startedAt > timeoutMs) {
         reject(
           new Error(
-            `Startup manifest did not resolve before timeout: ${missingPaths.join(", ")}`
+            `Startup asset readiness timed out: ${missingAssets.join(", ")}`
           )
         );
         return;
       }
 
-      window.setTimeout(tick, 60);
+      window.setTimeout(tick, 40);
     }
 
     tick();
   });
 }
 
-function waitForFrames(frameCount: number) {
-  return new Promise<void>((resolve) => {
-    let frames = 0;
+function markAssetsReady(ids: readonly StartupAssetId[]) {
+  const store = useSceneLoadStore.getState();
+  ids.forEach((id) => store.markStartupAssetReady(id));
+}
 
-    function step() {
-      frames += 1;
-      if (frames >= frameCount) {
+function waitForAnimationFrames(frameCount: number) {
+  return new Promise<void>((resolve) => {
+    let framesRemaining = frameCount;
+    let settled = false;
+
+    function tick() {
+      if (settled) {
+        return;
+      }
+      framesRemaining -= 1;
+      if (framesRemaining <= 0) {
+        settled = true;
         resolve();
         return;
       }
-      requestAnimationFrame(step);
+      window.requestAnimationFrame(tick);
     }
 
-    requestAnimationFrame(step);
+    window.requestAnimationFrame(tick);
+    window.setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    }, Math.max(32, frameCount * 32));
   });
 }
 
-function waitForFramesOrMs(frameCount: number, maxMs: number) {
-  return Promise.race([waitForFrames(frameCount), waitForMs(maxMs)]);
-}
-
-function waitForMs(ms: number) {
+function waitForTimeout(durationMs: number) {
   return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
+    window.setTimeout(resolve, durationMs);
   });
 }
 
-function scheduleIdleTask(task: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
+function waitForWarmupCheckpointReady(
+  checkpointId: string,
+  timeoutMs: number,
+  requestVersion: number,
+  baselineScrollSequence: number
+) {
+  return new Promise<"compiled" | "interrupted">((resolve, reject) => {
+    const startedAt = performance.now();
 
-  if ("requestIdleCallback" in window) {
-    const idleWindow = window as Window & {
-      requestIdleCallback: (
-        callback: (deadline: IdleDeadline) => void,
-        options?: IdleRequestOptions
-      ) => number;
-      cancelIdleCallback: (handle: number) => void;
-    };
+    function tick() {
+      const state = useSceneLoadStore.getState();
+      const scrollState = useScrollStore.getState();
 
-    const handle = idleWindow.requestIdleCallback(() => task(), {
-      timeout: 1000,
-    });
+      if (state.compiledWarmupCheckpointIds.includes(checkpointId)) {
+        resolve("compiled");
+        return;
+      }
 
-    return () => idleWindow.cancelIdleCallback(handle);
-  }
+      if (
+        state.offscreenWarmupRequestVersion !== requestVersion ||
+        scrollState.sequence !== baselineScrollSequence
+      ) {
+        resolve("interrupted");
+        return;
+      }
 
-  const handle = globalThis.setTimeout(task, 0);
-  return () => globalThis.clearTimeout(handle);
-}
+      if (state.hasFallbackTriggered) {
+        reject(new Error(`Warmup fallback triggered for checkpoint ${checkpointId}.`));
+        return;
+      }
 
-function preloadBackgroundStartupAssets(tier: "high" | "medium" | "low") {
-  for (const group of STARTUP_BACKGROUND_PRELOAD_GROUPS) {
-    if (group.kind === "environment") {
-      useEnvironment.preload({ files: group.url });
-      continue;
+      if (performance.now() - startedAt > timeoutMs) {
+        reject(new Error(`Warmup checkpoint ${checkpointId} timed out.`));
+        return;
+      }
+
+      window.setTimeout(tick, 40);
     }
 
-    useGLTF.preload(group.url);
-  }
-
-  for (const texture of STARTUP_BACKGROUND_TEXTURE_PRELOADS) {
-    const options =
-      texture.actIndex == null
-        ? texture.colorSpace
-          ? { repeat: texture.repeat, colorSpace: THREE.SRGBColorSpace }
-          : { repeat: texture.repeat }
-        : getTextureSamplingOptions(resolveActMaterialTierConfig(texture.actIndex, tier).texture, {
-            repeat: texture.repeat,
-            colorSpace: texture.colorSpace === "srgb" ? THREE.SRGBColorSpace : undefined,
-          });
-    preloadRepeatingTexture(texture.url, options);
-  }
+    tick();
+  });
 }
 
-function markAssetsReady(ids: readonly StartupAssetId[]) {
-  const store = useSceneLoadStore.getState();
-  ids.forEach((id) => store.markCriticalAssetReady(id as StartupCriticalAsset));
+function waitForStableFrameReady(timeoutMs: number) {
+  return new Promise<void>((resolve, reject) => {
+    const startedAt = performance.now();
+
+    function tick() {
+      const state = useSceneLoadStore.getState();
+
+      if (state.stableFrameReady) {
+        resolve();
+        return;
+      }
+
+      if (state.hasFallbackTriggered) {
+        reject(new Error("Startup fallback triggered before deferred warmup began."));
+        return;
+      }
+
+      if (performance.now() - startedAt > timeoutMs) {
+        reject(new Error("Timed out waiting for stable frames before deferred warmup."));
+        return;
+      }
+
+      window.setTimeout(tick, 40);
+    }
+
+    tick();
+  });
+}
+
+function waitForDeferredWarmupWindow(
+  timeoutMs: number,
+  idleMs = 250
+) {
+  return new Promise<void>((resolve, reject) => {
+    const startedAt = performance.now();
+
+    function tick() {
+      const sceneState = useSceneLoadStore.getState();
+      const scrollState = useScrollStore.getState();
+      const updatedAt = scrollState.updatedAt ?? 0;
+      const now = performance.now();
+      const idleForMs =
+        updatedAt === 0 ? Number.POSITIVE_INFINITY : Math.max(now - updatedAt, 0);
+      if (idleForMs >= idleMs) {
+        resolve();
+        return;
+      }
+
+      if (sceneState.hasFallbackTriggered) {
+        reject(new Error("Startup fallback triggered while waiting for scroll idle."));
+        return;
+      }
+
+      if (now - startedAt > timeoutMs) {
+        reject(new Error("Timed out waiting for a deferred warmup idle window."));
+        return;
+      }
+
+      window.setTimeout(tick, 40);
+    }
+
+    tick();
+  });
 }
 
 function StartupModelPreloader({
@@ -165,6 +220,22 @@ function StartupModelPreloader({
   readinessIds: readonly StartupAssetId[];
 }) {
   useGLTF(path);
+
+  useEffect(() => {
+    markAssetsReady(readinessIds);
+  }, [readinessIds]);
+
+  return null;
+}
+
+function StartupEnvironmentPreloader({
+  path,
+  readinessIds,
+}: {
+  path: string;
+  readinessIds: readonly StartupAssetId[];
+}) {
+  useEnvironment({ files: path });
 
   useEffect(() => {
     markAssetsReady(readinessIds);
@@ -187,21 +258,57 @@ function StartupTexturePreloader({
   actIndex?: number;
 }) {
   const tier = useCapsStore((state) => state.caps?.tier ?? "low");
+  const tierConfig = useMemo(
+    () => (actIndex != null ? resolveActMaterialTierConfig(actIndex, tier) : null),
+    [actIndex, tier]
+  );
+  const resolvedUrl = useMemo(() => {
+    if (!tierConfig) {
+      return url;
+    }
+
+    if (assetId.endsWith("-color")) {
+      return tierConfig.texture.useColorMap
+        ? resolveTextureVariantUrl(url, tierConfig.texture.resolution)
+        : null;
+    }
+
+    if (assetId.endsWith("-normal")) {
+      return tierConfig.texture.useNormalMap ? url : null;
+    }
+
+    if (assetId.endsWith("-roughness")) {
+      return tierConfig.texture.useRoughnessMap ? url : null;
+    }
+
+    if (assetId.endsWith("-metalness")) {
+      return tierConfig.texture.useMetalnessMap ? url : null;
+    }
+
+    return url;
+  }, [assetId, tierConfig, url]);
   const options = useMemo(() => {
-    if (actIndex == null) {
+    if (tierConfig == null) {
       return colorSpace ? { repeat, colorSpace } : { repeat };
     }
 
-    const config = resolveActMaterialTierConfig(actIndex, tier);
-    return getTextureSamplingOptions(config.texture, { repeat, colorSpace });
-  }, [actIndex, colorSpace, repeat, tier]);
+    return getTextureSamplingOptions(tierConfig.texture, { repeat, colorSpace });
+  }, [colorSpace, repeat, tierConfig]);
 
-  const texture = useRepeatingTexture(url, options);
+  const texture = useOptionalRepeatingTexture(resolvedUrl, options);
 
   useEffect(() => {
     let cancelled = false;
 
+    if (resolvedUrl == null) {
+      useSceneLoadStore.getState().markStartupAssetReady(assetId);
+      return;
+    }
+
     function isTextureResolved() {
+      if (!texture) {
+        return false;
+      }
       const sourceData = texture.source?.data;
       const imageData = texture.image;
       return Boolean(sourceData ?? imageData);
@@ -210,11 +317,7 @@ function StartupTexturePreloader({
     function markWhenResolved() {
       if (cancelled) return;
       if (isTextureResolved()) {
-        if (STARTUP_CRITICAL_ASSET_IDS.includes(assetId as StartupCriticalAsset)) {
-          useSceneLoadStore.getState().markCriticalAssetReady(
-            assetId as StartupCriticalAsset
-          );
-        }
+        useSceneLoadStore.getState().markStartupAssetReady(assetId);
         return;
       }
       window.setTimeout(markWhenResolved, 16);
@@ -225,67 +328,159 @@ function StartupTexturePreloader({
     return () => {
       cancelled = true;
     };
-  }, [assetId, texture]);
+  }, [assetId, resolvedUrl, texture]);
 
   return null;
 }
 
 export function SceneStartupController() {
   const caps = useCapsStore((state) => state.caps);
-
   useLayoutEffect(() => {
     if (!caps) return;
     useSceneLoadStore.getState().resetStartup();
   }, [caps]);
 
-  useEffect(() => {
-    if (!caps) return;
-
-    let cancelled = false;
-    const loadBudgetMs = caps.budgets.loadTimeMs;
-    const tier = caps.tier;
-    let cancelBackgroundPreloads = () => {};
-
-    async function runWarmupSweep() {
-      for (const actIndex of STARTUP_WARMUP_ACT_SEQUENCE) {
-        const current = useSceneLoadStore.getState();
-        if (cancelled || current.hasFallbackTriggered) {
+  async function runCheckpointWarmupSweep(
+    checkpoints: readonly { id: string; activeAct: number }[],
+    timeoutMs: number
+  ) {
+    for (const checkpoint of checkpoints) {
+      const current = useSceneLoadStore.getState();
+      if (
+        current.hasFallbackTriggered ||
+        current.compiledWarmupCheckpointIds.includes(checkpoint.id)
+      ) {
+        if (current.hasFallbackTriggered) {
           return;
         }
+        continue;
+      }
 
-        current.setWarmupActIndex(actIndex);
-        await waitForFramesOrMs(WARMUP_FRAME_COUNT, WARMUP_FRAME_WAIT_CAP_MS);
-        await waitForMs(WARMUP_SETTLE_MS);
+      let checkpointCompiled = false;
 
-        if (cancelled) return;
-        useSceneLoadStore.getState().markWarmupActReady(actIndex);
+      while (!checkpointCompiled) {
+        const scrollState = useScrollStore.getState();
+        const immediateWarmupWindow =
+          Math.abs(scrollState.progress) <= 0.001 && scrollState.direction === 0;
+        if (!immediateWarmupWindow) {
+          await waitForDeferredWarmupWindow(timeoutMs);
+        }
+
+        const store = useSceneLoadStore.getState();
+        if (
+          store.hasFallbackTriggered ||
+          store.compiledWarmupCheckpointIds.includes(checkpoint.id)
+        ) {
+          checkpointCompiled = true;
+          break;
+        }
+
+        const baselineScrollSequence = useScrollStore.getState().sequence;
+        const requestVersion = store.requestOffscreenWarmup(
+          checkpoint.id,
+          checkpoint.activeAct
+        );
+        const result = await waitForWarmupCheckpointReady(
+          checkpoint.id,
+          timeoutMs,
+          requestVersion,
+          baselineScrollSequence
+        );
+
+        if (result === "compiled") {
+          checkpointCompiled = true;
+          if (!immediateWarmupWindow) {
+            await waitForAnimationFrames(1);
+            await waitForTimeout(40);
+          }
+        } else {
+          useSceneLoadStore.getState().clearOffscreenWarmupRequest();
+          await waitForAnimationFrames(1);
+        }
       }
     }
 
+    const store = useSceneLoadStore.getState();
+    store.clearOffscreenWarmupRequest();
+  }
+
+  useEffect(() => {
+    if (!caps) return;
+
+    const runtimeCaps = caps;
+    let cancelled = false;
+    const loadBudgetMs = runtimeCaps.budgets.loadTimeMs;
+    const backgroundWarmupQueue = DEFERRED_WARMUP_CHECKPOINT_QUEUE;
+
     async function runStartupPipeline() {
       try {
+        const [entryActIndex] = ENTRY_WARMUP_ACT_SEQUENCE;
         const manifestTimeoutMs = Math.max(loadBudgetMs - 1000, 1000);
-        const manifestRequests = waitForManifestRequests(manifestTimeoutMs);
-        const warmupSweep = runWarmupSweep();
+        const effectiveEntryCriticalAssetIds = getEffectiveStartupAssetIdsForStage(
+          "entryCritical",
+          runtimeCaps.tier
+        );
+        const effectiveNearScrollAssetIds = getEffectiveStartupAssetIdsForStage(
+          "nearScrollCritical",
+          runtimeCaps.tier
+        );
+        const entryManifestRequests = waitForLoadedAssets(
+          effectiveEntryCriticalAssetIds,
+          manifestTimeoutMs
+        );
+        const nearScrollRequests = waitForLoadedAssets(
+          effectiveNearScrollAssetIds,
+          loadBudgetMs + 1500
+        )
+          .then(() => {
+            if (!cancelled) {
+              useSceneLoadStore.getState().markNearScrollReady();
+            }
+          })
+          .catch((error) => {
+            console.warn("[SceneStartupController] Near-scroll preload lagged.", error);
+          });
+        const deferredAssetIds = getEffectiveStartupAssetIdsForStage(
+          "deferred",
+          runtimeCaps.tier
+        );
+        const deferredWarmupTimeoutMs = Math.max(loadBudgetMs * 6, 30_000);
+        const store = useSceneLoadStore.getState();
+        if (backgroundWarmupQueue.length > 0 || deferredAssetIds.length > 0) {
+          store.markDeferredPreloadStarted();
+        }
+        void Promise.all([
+          deferredAssetIds.length > 0
+            ? waitForLoadedAssets(deferredAssetIds, deferredWarmupTimeoutMs)
+            : Promise.resolve(),
+          backgroundWarmupQueue.length > 0
+            ? waitForStableFrameReady(deferredWarmupTimeoutMs).then(() =>
+                runCheckpointWarmupSweep(backgroundWarmupQueue, deferredWarmupTimeoutMs)
+              )
+            : Promise.resolve(),
+        ])
+          .then(() => {
+            if (!cancelled) {
+              useSceneLoadStore.getState().markDeferredPreloadReady();
+            }
+          })
+          .catch((error) => {
+            console.warn("[SceneStartupController] Deferred preload lagged.", error);
+          });
 
-        await manifestRequests;
+        await Promise.all([entryManifestRequests, nearScrollRequests]);
 
         if (cancelled) return;
 
-        useSceneLoadStore.getState().markAssetManifestReady();
-
-        await warmupSweep;
-
-        if (cancelled) return;
-
-        useSceneLoadStore.getState().setWarmupActIndex(null);
-        useSceneLoadStore.getState().markWarmupReady();
-        cancelBackgroundPreloads = scheduleIdleTask(() => {
-          if (cancelled || useSceneLoadStore.getState().hasFallbackTriggered) {
-            return;
-          }
-          preloadBackgroundStartupAssets(tier);
-        });
+        store.markAssetManifestReady();
+        if (entryActIndex != null) {
+          store.markActPrepared(entryActIndex);
+          store.markActCompiled(entryActIndex);
+          store.markWarmupActReady(entryActIndex);
+        }
+        store.markWarmupActReady(1);
+        store.markWarmupReady();
+        store.markCompileReady();
       } catch (error) {
         console.warn("[SceneStartupController] Startup preload failed.", error);
         if (!cancelled) {
@@ -298,8 +493,9 @@ export function SceneStartupController() {
 
     return () => {
       cancelled = true;
-      cancelBackgroundPreloads();
       useSceneLoadStore.getState().setWarmupActIndex(null);
+      useSceneLoadStore.getState().setOffscreenWarmupActIndex(null);
+      useSceneLoadStore.getState().setOffscreenWarmupCheckpointId(null);
     };
   }, [caps]);
 
@@ -309,12 +505,70 @@ export function SceneStartupController() {
 
   return (
     <>
-      {STARTUP_INTERACTIVE_PRELOAD_GROUPS.map((group) => (
+      {STARTUP_ENTRY_CRITICAL_PRELOAD_GROUPS.map((group) => (
         <Suspense key={group.url} fallback={null}>
-          <StartupModelPreloader path={group.url} readinessIds={group.readinessIds} />
+          {group.kind === "environment" ? (
+            <StartupEnvironmentPreloader
+              path={group.url}
+              readinessIds={group.readinessIds}
+            />
+          ) : (
+            <StartupModelPreloader path={group.url} readinessIds={group.readinessIds} />
+          )}
         </Suspense>
       ))}
-      {STARTUP_INTERACTIVE_TEXTURE_PRELOADS.map((texture) => (
+      {STARTUP_ENTRY_CRITICAL_TEXTURE_PRELOADS.map((texture) => (
+        <StartupTexturePreloader
+          key={texture.id}
+          assetId={texture.id}
+          url={texture.url}
+          repeat={texture.repeat}
+          colorSpace={
+            texture.colorSpace === "srgb" ? THREE.SRGBColorSpace : undefined
+          }
+          actIndex={texture.actIndex}
+        />
+      ))}
+      {STARTUP_NEAR_SCROLL_PRELOAD_GROUPS.map((group) => (
+        <Suspense key={group.url} fallback={null}>
+          {group.kind === "environment" ? (
+            <StartupEnvironmentPreloader
+              path={group.url}
+              readinessIds={group.readinessIds}
+            />
+          ) : (
+            <StartupModelPreloader path={group.url} readinessIds={group.readinessIds} />
+          )}
+        </Suspense>
+      ))}
+      {STARTUP_NEAR_SCROLL_TEXTURE_PRELOADS.map((texture) => (
+        <StartupTexturePreloader
+          key={texture.id}
+          assetId={texture.id}
+          url={texture.url}
+          repeat={texture.repeat}
+          colorSpace={
+            texture.colorSpace === "srgb" ? THREE.SRGBColorSpace : undefined
+          }
+          actIndex={texture.actIndex}
+        />
+      ))}
+      {STARTUP_DEFERRED_PRELOAD_GROUPS.map((group) => (
+        <Suspense key={group.url} fallback={null}>
+          {group.kind === "environment" ? (
+            <StartupEnvironmentPreloader
+              path={group.url}
+              readinessIds={group.readinessIds}
+            />
+          ) : (
+            <StartupModelPreloader
+              path={group.url}
+              readinessIds={group.readinessIds}
+            />
+          )}
+        </Suspense>
+      ))}
+      {STARTUP_DEFERRED_TEXTURE_PRELOADS.map((texture) => (
         <StartupTexturePreloader
           key={texture.id}
           assetId={texture.id}

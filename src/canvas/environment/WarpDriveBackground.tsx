@@ -5,6 +5,7 @@ import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
 import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
 import { useCursorStore } from "@/stores/cursorStore";
+import { getActWeight, isActVisible, useWorldMotionRef } from "@/canvas/worldMotion";
 
 const WarpDriveShaderMaterial = shaderMaterial(
   {
@@ -110,30 +111,32 @@ declare module "@react-three/fiber" {
 }
 
 interface WarpDriveBackgroundProps {
-  progress: number;
+  actIndex: number;
   enabled?: boolean;
   opacityScale?: number;
 }
 
 export function WarpDriveBackground({
-  progress,
+  actIndex,
   enabled = true,
   opacityScale = 1,
 }: WarpDriveBackgroundProps) {
+  const motionRef = useWorldMotionRef();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
   const resVec = useMemo(() => new THREE.Vector2(1920, 1080), []);
   const mouseVec = useMemo(() => new THREE.Vector2(0.5, 0.5), []);
 
   useFrame((state) => {
-    if (!enabled || !matRef.current) return;
+    const motion = motionRef.current;
+    const progress = getActWeight(motion, actIndex);
+    if (!enabled || !matRef.current || !isActVisible(motion, actIndex)) return;
     matRef.current.iTime = state.clock.elapsedTime;
     resVec.set(state.size.width, state.size.height);
     matRef.current.iResolution = resVec;
     const { x, y } = useCursorStore.getState();
     mouseVec.set(x, y);
     matRef.current.iMouse = mouseVec;
-    // Fade in with act progress
     matRef.current.uOpacity = Math.min(progress / 0.3, 1) * 0.85 * opacityScale;
   });
 

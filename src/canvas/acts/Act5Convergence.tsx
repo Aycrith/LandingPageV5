@@ -9,15 +9,17 @@ import { seededUnit } from "@/lib/random";
 import { WarpDriveBackground } from "@/canvas/environment/WarpDriveBackground";
 import { ShaderLinesField } from "@/canvas/environment/ShaderLinesField";
 import { useActMaterialTierConfig } from "./materialTierConfig";
-
-interface ActProps {
-  progress: number;
-  visible: boolean;
-}
+import { getActWeight, useWorldMotionRef } from "@/canvas/worldMotion";
 
 const ACT_PROFILE = ACT_VIEWPORT_PROFILES[4];
+const ACT_INDEX = 4;
 
-export function Act5Convergence({ progress, visible }: ActProps) {
+export function Act5Convergence({
+  auditEnabled = true,
+}: {
+  auditEnabled?: boolean;
+}) {
+  const motionRef = useWorldMotionRef();
   const groupRef = useRef<THREE.Group>(null);
   const vortexRef = useRef<THREE.Mesh>(null);
   const vortexMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
@@ -27,6 +29,9 @@ export function Act5Convergence({ progress, visible }: ActProps) {
   const trailsRef = useRef<THREE.InstancedMesh>(null);
   const diskRef = useRef<THREE.Mesh>(null);
   const secondaryDiskRef = useRef<THREE.Mesh>(null);
+  const keyLightRef = useRef<THREE.PointLight>(null);
+  const fillLightRef = useRef<THREE.PointLight>(null);
+  const accentLightRef = useRef<THREE.PointLight>(null);
 
   const tierConfig = useActMaterialTierConfig(4);
   const trailCount = tierConfig.mesh.trailCount;
@@ -44,13 +49,20 @@ export function Act5Convergence({ progress, visible }: ActProps) {
   }, [trailCount]);
 
   useEffect(() => {
+    if (!auditEnabled) {
+      return;
+    }
     return () => {
       useViewportAuditStore.getState().clearFxLayer("act5-inner-core");
     };
-  }, []);
+  }, [auditEnabled]);
 
   useFrame((state) => {
-    if (!visible || !groupRef.current) return;
+    if (!groupRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    groupRef.current.visible = visible;
+    if (!visible) return;
     const t = state.clock.elapsedTime;
     groupRef.current.position.set(0, 0.8, -0.55);
 
@@ -86,10 +98,12 @@ export function Act5Convergence({ progress, visible }: ActProps) {
         progress
       );
       innerCoreMaterialRef.current.opacity = opacity;
-      useViewportAuditStore.getState().reportFxLayer("act5-inner-core", {
-        opacity,
-        scale: innerCoreRef.current?.scale.x,
-      });
+      if (auditEnabled) {
+        useViewportAuditStore.getState().reportFxLayer("act5-inner-core", {
+          opacity,
+          scale: innerCoreRef.current?.scale.x,
+        });
+      }
     }
 
     if (diskRef.current) {
@@ -128,14 +142,30 @@ export function Act5Convergence({ progress, visible }: ActProps) {
     }
 
     groupRef.current.visible = true;
+    if (keyLightRef.current) {
+      keyLightRef.current.intensity =
+        progress * 24 * tierConfig.material.emissiveScale;
+    }
+    if (fillLightRef.current) {
+      fillLightRef.current.intensity =
+        progress * 5 * tierConfig.material.emissiveScale;
+    }
+    if (accentLightRef.current) {
+      accentLightRef.current.intensity =
+        progress * 6 * tierConfig.material.emissiveScale;
+    }
   });
 
-  if (!visible) return null;
-
   return (
-    <group ref={groupRef}>
-      <WarpDriveBackground progress={progress} enabled={tierConfig.shader.enableWarpBackground} />
-      <ShaderLinesField progress={progress} enabled={tierConfig.shader.enableShaderLines} />
+    <group ref={groupRef} visible={false}>
+      <WarpDriveBackground
+        actIndex={ACT_INDEX}
+        enabled={tierConfig.shader.enableWarpBackground}
+      />
+      <ShaderLinesField
+        actIndex={ACT_INDEX}
+        enabled={tierConfig.shader.enableShaderLines}
+      />
 
       <mesh ref={vortexRef}>
         <icosahedronGeometry args={[1, tierConfig.mesh.primaryDetail]} />
@@ -185,7 +215,7 @@ export function Act5Convergence({ progress, visible }: ActProps) {
         <meshBasicMaterial
           color="#d0a2ff"
           transparent
-          opacity={progress * 0.2}
+          opacity={0}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           side={THREE.DoubleSide}
@@ -204,20 +234,23 @@ export function Act5Convergence({ progress, visible }: ActProps) {
         />
       </instancedMesh>
       <pointLight
+        ref={keyLightRef}
         color="#ff7eb3"
-        intensity={progress * 24 * tierConfig.material.emissiveScale}
+        intensity={0}
         distance={36}
         decay={2}
       />
       <pointLight
+        ref={fillLightRef}
         color="#ffffff"
-        intensity={progress * 5 * tierConfig.material.emissiveScale}
+        intensity={0}
         distance={14}
         decay={2}
       />
       <pointLight
+        ref={accentLightRef}
         color="#d0a2ff"
-        intensity={progress * 6 * tierConfig.material.emissiveScale}
+        intensity={0}
         distance={24}
         decay={2}
         position={[0, 4.2, -1]}

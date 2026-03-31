@@ -3,21 +3,24 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { resolveTextureVariantUrl } from "@/canvas/assetManifest";
 import { CrystalMaterial } from "@/canvas/materials/CrystalMaterial";
 import { seededSigned, seededUnit } from "@/lib/random";
-import { useRepeatingTexture } from "@/lib/textures";
+import { useOptionalRepeatingTexture } from "@/lib/textures";
 import { useActMaterialTierConfig, getTextureSamplingOptions } from "./materialTierConfig";
 import { DottedWave } from "@/canvas/environment/DottedWave";
+import { getActWeight, useWorldMotionRef } from "@/canvas/worldMotion";
 
-interface ActProps {
-  progress: number;
-  visible: boolean;
-}
-export function Act4Quantum({ progress, visible }: ActProps) {
+const ACT_INDEX = 3;
+
+export function Act4Quantum() {
+  const motionRef = useWorldMotionRef();
   const groupRef = useRef<THREE.Group>(null);
   const attractor1Ref = useRef<THREE.Mesh>(null);
   const attractor2Ref = useRef<THREE.Mesh>(null);
   const orbitalsRef = useRef<THREE.InstancedMesh>(null);
+  const keyLightRef = useRef<THREE.PointLight>(null);
+  const fillLightRef = useRef<THREE.PointLight>(null);
 
   const tierConfig = useActMaterialTierConfig(3);
   const orbitalCount = tierConfig.mesh.orbitalCount;
@@ -42,7 +45,11 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   const posTempRef = useRef(new THREE.Vector3());
 
   useFrame((state) => {
-    if (!visible || !groupRef.current) return;
+    if (!groupRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    groupRef.current.visible = visible;
+    if (!visible) return;
     const t = state.clock.elapsedTime;
 
     const separation = Math.sin(progress * Math.PI) * 3.2;
@@ -93,13 +100,19 @@ export function Act4Quantum({ progress, visible }: ActProps) {
     }
 
     groupRef.current.visible = progress > 0.01;
+    if (keyLightRef.current) {
+      keyLightRef.current.intensity =
+        progress * 10 * tierConfig.material.emissiveScale;
+    }
+    if (fillLightRef.current) {
+      fillLightRef.current.intensity =
+        progress * 10 * tierConfig.material.emissiveScale;
+    }
   });
 
-  if (!visible) return null;
-
   return (
-    <group ref={groupRef}>
-      <DottedWave progress={progress} color="#ffd06f" yOffset={-4.1} />
+    <group ref={groupRef} visible={false}>
+      <DottedWave actIndex={ACT_INDEX} color="#ffd06f" yOffset={-4.1} />
 
       <mesh ref={attractor1Ref}>
         <dodecahedronGeometry args={[0.5, tierConfig.mesh.primaryDetail]} />
@@ -155,18 +168,22 @@ export function Act4Quantum({ progress, visible }: ActProps) {
         />
       </instancedMesh>
 
-      <EnergyBeam progress={progress} beamPoints={tierConfig.mesh.beamPoints} />
-      <Ground103Floor progress={progress} />
+      <EnergyBeam
+        beamPoints={tierConfig.mesh.beamPoints}
+      />
+      <Ground103Floor />
       <pointLight
+        ref={keyLightRef}
         color="#ffd06f"
-        intensity={10 * tierConfig.material.emissiveScale}
+        intensity={0}
         distance={18}
         decay={2}
         position={[-3, 0, 0]}
       />
       <pointLight
+        ref={fillLightRef}
         color="#ff7eb3"
-        intensity={10 * tierConfig.material.emissiveScale}
+        intensity={0}
         distance={18}
         decay={2}
         position={[3, 0, 0]}
@@ -175,7 +192,12 @@ export function Act4Quantum({ progress, visible }: ActProps) {
   );
 }
 
-function EnergyBeam({ progress, beamPoints }: { progress: number; beamPoints: number }) {
+function EnergyBeam({
+  beamPoints,
+}: {
+  beamPoints: number;
+}) {
+  const motionRef = useWorldMotionRef();
   const positionAttrRef = useRef<THREE.BufferAttribute>(null);
   const materialRef = useRef<THREE.LineBasicMaterial>(null);
   const positions = useMemo(() => {
@@ -193,6 +215,9 @@ function EnergyBeam({ progress, beamPoints }: { progress: number; beamPoints: nu
     const t = state.clock.elapsedTime;
     const pos = positionAttrRef.current;
     if (!pos) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    if (!visible) return;
     const separation = Math.sin(progress * Math.PI) * 3.5;
     const array = pos.array as Float32Array;
 
@@ -230,25 +255,37 @@ function EnergyBeam({ progress, beamPoints }: { progress: number; beamPoints: nu
   );
 }
 
-function Ground103Floor({ progress }: { progress: number }) {
+function Ground103Floor() {
+  const motionRef = useWorldMotionRef();
   const tierConfig = useActMaterialTierConfig(3);
   const colorOpts = getTextureSamplingOptions(tierConfig.texture, { repeat: 8, colorSpace: THREE.SRGBColorSpace });
   const mapOpts = getTextureSamplingOptions(tierConfig.texture, { repeat: 8 });
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const colorMap = useRepeatingTexture(
-    "/textures/pbr/ground103/Ground103_2K-PNG_Color.png",
+  const colorMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useColorMap
+      ? resolveTextureVariantUrl(
+          "/textures/pbr/ground103/Ground103_2K-PNG_Color.png",
+          tierConfig.texture.resolution
+        )
+      : null,
     colorOpts
   );
-  const normalMap = useRepeatingTexture(
-    "/textures/pbr/ground103/Ground103_2K-PNG_NormalGL.png",
+  const normalMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useNormalMap
+      ? "/textures/pbr/ground103/Ground103_2K-PNG_NormalGL.png"
+      : null,
     mapOpts
   );
-  const roughnessMap = useRepeatingTexture(
-    "/textures/pbr/ground103/Ground103_2K-PNG_Roughness.png",
+  const roughnessMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useRoughnessMap
+      ? "/textures/pbr/ground103/Ground103_2K-PNG_Roughness.png"
+      : null,
     mapOpts
   );
 
   useFrame(() => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    if (progress <= 0.01) return;
     if (matRef.current) {
       matRef.current.opacity = Math.min(progress / 0.35, 1) * 0.68;
     }

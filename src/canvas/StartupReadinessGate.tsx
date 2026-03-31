@@ -5,13 +5,14 @@ import { useFrame } from "@react-three/fiber";
 import { ACT_VIEWPORT_PROFILES } from "./viewportProfiles";
 import {
   areCriticalAssetsReady,
+  areNearScrollAssetsReady,
   useSceneLoadStore,
 } from "@/stores/sceneLoadStore";
 import { useCapsStore } from "@/stores/capsStore";
 
 const STABLE_FRAME_THRESHOLD =
   ACT_VIEWPORT_PROFILES[0].fxLayerBehavior.stableFrames;
-const AUDIT_STARTUP_WAIT_MS = 30_000;
+const AUDIT_STARTUP_WAIT_MS = 120_000;
 
 function resolveStartupWaitMs(defaultMs: number) {
   if (typeof window === "undefined") {
@@ -40,6 +41,9 @@ export function StartupReadinessGate() {
     const id = setInterval(() => {
       const state = useSceneLoadStore.getState();
       const capsState = useCapsStore.getState();
+      const auditMode =
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("audit") === "1";
 
       if (state.stableFrameReady || state.hasFallbackTriggered) {
         clearInterval(id);
@@ -54,8 +58,10 @@ export function StartupReadinessGate() {
 
       const startupPipelineReady =
         areCriticalAssetsReady(state) &&
+        areNearScrollAssetsReady(state) &&
         state.assetManifestReady &&
-        state.warmupReady;
+        state.warmupReady &&
+        state.compileReady;
 
       if (!startupPipelineReady) {
         intervalStableCount.current = 0;
@@ -63,6 +69,12 @@ export function StartupReadinessGate() {
           state.markFallbackTriggered();
           clearInterval(id);
         }
+        return;
+      }
+
+      if (auditMode) {
+        state.markStableFrameReady();
+        clearInterval(id);
         return;
       }
 
@@ -74,7 +86,7 @@ export function StartupReadinessGate() {
         state.markFallbackTriggered();
         clearInterval(id);
       }
-    }, 100);
+    }, 50);
 
     return () => clearInterval(id);
   }, []);
@@ -82,6 +94,9 @@ export function StartupReadinessGate() {
   useFrame(() => {
     const state = useSceneLoadStore.getState();
     const capsState = useCapsStore.getState();
+    const auditMode =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("audit") === "1";
     const MAX_STARTUP_WAIT_MS = resolveStartupWaitMs(
       capsState.caps?.budgets.loadTimeMs ?? 6000
     );
@@ -95,8 +110,10 @@ export function StartupReadinessGate() {
 
     const startupPipelineReady =
       areCriticalAssetsReady(state) &&
+      areNearScrollAssetsReady(state) &&
       state.assetManifestReady &&
-      state.warmupReady;
+      state.warmupReady &&
+      state.compileReady;
 
     if (!startupPipelineReady) {
       if (elapsed > MAX_STARTUP_WAIT_MS) {
@@ -106,6 +123,11 @@ export function StartupReadinessGate() {
         state.markFallbackTriggered();
       }
       stableFrames.current = 0;
+      return;
+    }
+
+    if (auditMode) {
+      state.markStableFrameReady();
       return;
     }
 

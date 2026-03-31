@@ -263,7 +263,11 @@ export const ACT_MATERIAL_TIER_CONFIG: Record<number, Record<QualityTier, ActMat
   },
   1: {
     high: {
-      texture: textureConfig("full", { useMetalnessMap: false }),
+      texture: textureConfig("quarter", {
+        useMetalnessMap: false,
+        useNormalMap: false,
+        useRoughnessMap: false,
+      }),
       mesh: meshConfig("high", { primaryDetail: 4, bodyCount: 18, circleSegments: 96 }),
       shader: shaderConfig("full", { crystalFresnel: 0, crystalIridescence: 0 }),
       material: materialConfig("high", { envMapScale: 0.9 }),
@@ -283,7 +287,11 @@ export const ACT_MATERIAL_TIER_CONFIG: Record<number, Record<QualityTier, ActMat
   },
   2: {
     high: {
-      texture: textureConfig("full"),
+      texture: textureConfig("quarter", {
+        useNormalMap: false,
+        useRoughnessMap: false,
+        useMetalnessMap: false,
+      }),
       mesh: meshConfig("high", { planeSegments: 96, ribbonCount: 4, circleSegments: 64 }),
       shader: shaderConfig("full"),
       material: materialConfig("high", { opacityScale: 1 }),
@@ -303,7 +311,11 @@ export const ACT_MATERIAL_TIER_CONFIG: Record<number, Record<QualityTier, ActMat
   },
   3: {
     high: {
-      texture: textureConfig("full", { useMetalnessMap: false }),
+      texture: textureConfig("full", {
+        useMetalnessMap: false,
+        useNormalMap: false,
+        useRoughnessMap: false,
+      }),
       mesh: meshConfig("high", { orbitalCount: 64, beamPoints: 50, circleSegments: 64, primaryDetail: 2, secondaryDetail: 2 }),
       shader: shaderConfig("full", { crystalFresnel: 2, crystalIridescence: 0.8 }),
       material: materialConfig("high", { opacityScale: 1 }),
@@ -344,7 +356,7 @@ export const ACT_MATERIAL_TIER_CONFIG: Record<number, Record<QualityTier, ActMat
   5: {
     high: {
       texture: textureConfig("full", { useColorMap: false, useNormalMap: false, useRoughnessMap: false, useMetalnessMap: false }),
-      mesh: meshConfig("high", { latticeCount: 360, dendriteCount: 24, tubulinCount: 24, primaryDetail: 6, secondaryDetail: 5 }),
+      mesh: meshConfig("high", { latticeCount: 360, dendriteCount: 10, tubulinCount: 24, primaryDetail: 6, secondaryDetail: 5 }),
       shader: shaderConfig("full", { enableWarpBackground: false, enableShaderLines: false }),
       material: materialConfig("high", { emissiveScale: 1.08, transmissionScale: 1.1 }),
     },
@@ -373,7 +385,10 @@ export function resolveActMaterialTierConfig(
 
 export function useActMaterialTierConfig(actIndex: number): ActMaterialTierConfig {
   const tier = useCapsStore((state) => state.caps?.tier ?? "low");
-  return useMemo(() => resolveActMaterialTierConfig(actIndex, tier), [actIndex, tier]);
+  return useMemo(
+    () => resolveActMaterialTierConfig(actIndex, tier),
+    [actIndex, tier]
+  );
 }
 
 export function getTextureSamplingOptions(

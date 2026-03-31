@@ -22,15 +22,29 @@ interface BudgetHealthMetric {
   score: number;
   within: {
     frameTime: boolean;
+    scrollLatency: boolean;
     drawCalls: boolean;
     triangles: boolean;
     geometries: boolean;
     textures: boolean;
+    textureMemory: boolean;
     programs: boolean;
     points: boolean;
+    jsHeap: boolean;
+    longTasks: boolean;
     loadTime: boolean;
   };
   violations: string[];
+}
+
+interface RendererDriftMetric {
+  calls: number;
+  triangles: number;
+  points: number;
+  lines: number;
+  geometries: number;
+  textures: number;
+  programs: number;
 }
 
 interface RenderPipelineMetric {
@@ -38,12 +52,27 @@ interface RenderPipelineMetric {
   meanCpuMs: number;
   p95CpuMs: number;
   maxCpuMs: number;
+  meanScrollLatencyMs: number;
+  p95ScrollLatencyMs: number;
+  maxScrollLatencyMs: number;
+  over16ScrollLatencyMs: number;
+  over33ScrollLatencyMs: number;
   meanDeltaMs: number;
   p95DeltaMs: number;
   maxDeltaMs: number;
   over33DeltaMs: number;
   over50DeltaMs: number;
   over100DeltaMs: number;
+  longTasks: {
+    count: number;
+    over50Count: number;
+    totalDurationMs: number;
+    maxDurationMs: number;
+  };
+  memory: {
+    jsHeapUsedMB: number | null;
+    estimatedTextureMemoryMB: number;
+  };
   renderer: {
     frame: number;
     calls: number;
@@ -54,7 +83,44 @@ interface RenderPipelineMetric {
     textures: number;
     programs: number;
   };
+  postReadyRendererDrift: RendererDriftMetric | null;
   budget: BudgetHealthMetric;
+}
+
+interface StartupPhaseTimingMetric {
+  assetManifestMs: number | null;
+  nearScrollMs: number | null;
+  warmupMs: number | null;
+  compileMs: number | null;
+  stableFrameMs: number | null;
+  deferredStartedMs: number | null;
+  deferredReadyMs: number | null;
+  readyMs: number | null;
+}
+
+interface ResourceTimingMetric {
+  id: string;
+  url: string;
+  stage: string;
+  kind: string;
+  transferSizeBytes: number;
+  durationMs: number;
+  lateAfterReady: boolean;
+}
+
+interface ResourcePipelineMetric {
+  loadedEntryCritical: number;
+  totalEntryCritical: number;
+  loadedNearScroll: number;
+  totalNearScroll: number;
+  loadedDeferred: number;
+  totalDeferred: number;
+  lateEntryCriticalCount: number;
+  lateNearScrollCount: number;
+  totalTransferSizeBytes: number;
+  totalTextureTransferSizeBytes: number;
+  estimatedTextureMemoryMB: number;
+  assetTimings: ResourceTimingMetric[];
 }
 
 interface TelemetryMetric {
@@ -65,10 +131,21 @@ interface TelemetryMetric {
   startupPhase: string | null;
   assetProgress: number;
   warmupProgress: number;
+  warmupActCount: number;
+  warmedActs: number[];
   assetManifestReady: boolean;
+  nearScrollReady: boolean;
   warmupReady: boolean;
+  compileReady: boolean;
+  gpuWarmupReady: boolean;
+  deferredPreloadReady: boolean;
+  startupPhaseTimings: StartupPhaseTimingMetric;
   lateRequestCount: number;
   lateRequestUrls: string[];
+  compiledCheckpointIds?: string[];
+  activeProgramSignatures?: string[];
+  warmupCheckpointProgramCounts?: Record<string, number>;
+  warmupCheckpointMissingPrograms?: Record<string, string[]>;
 }
 
 interface SceneStateMetric {
@@ -109,6 +186,7 @@ interface ViewportAuditState {
   heroModels: Record<string, HeroModelMetric>;
   fxLayers: Record<string, FxLayerMetric>;
   renderPipeline: RenderPipelineMetric | null;
+  resourcePipeline: ResourcePipelineMetric | null;
   lightingPipeline: LightingPipelineMetric | null;
   telemetry: TelemetryMetric;
   sceneState: SceneStateMetric;
@@ -121,6 +199,7 @@ interface ViewportAuditState {
   clearFxLayer: (label: string) => void;
   pruneFxLayers: (labels: string[]) => void;
   reportRenderPipeline: (metric: RenderPipelineMetric) => void;
+  reportResourcePipeline: (metric: ResourcePipelineMetric) => void;
   reportLightingPipeline: (metric: LightingPipelineMetric) => void;
   reportTelemetry: (metric: Partial<TelemetryMetric>) => void;
   reportSceneState: (metric: Partial<SceneStateMetric>) => void;
@@ -135,10 +214,30 @@ const INITIAL_TELEMETRY: TelemetryMetric = {
   startupPhase: null,
   assetProgress: 0,
   warmupProgress: 0,
+  warmupActCount: 0,
+  warmedActs: [],
   assetManifestReady: false,
+  nearScrollReady: false,
   warmupReady: false,
+  compileReady: false,
+  gpuWarmupReady: false,
+  deferredPreloadReady: false,
+  startupPhaseTimings: {
+    assetManifestMs: null,
+    nearScrollMs: null,
+    warmupMs: null,
+    compileMs: null,
+    stableFrameMs: null,
+    deferredStartedMs: null,
+    deferredReadyMs: null,
+    readyMs: null,
+  },
   lateRequestCount: 0,
   lateRequestUrls: [],
+  compiledCheckpointIds: [],
+  activeProgramSignatures: [],
+  warmupCheckpointProgramCounts: {},
+  warmupCheckpointMissingPrograms: {},
 };
 
 const INITIAL_SCENE_STATE: SceneStateMetric = {
@@ -167,6 +266,7 @@ export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
   heroModels: {},
   fxLayers: {},
   renderPipeline: null,
+  resourcePipeline: null,
   lightingPipeline: null,
   telemetry: INITIAL_TELEMETRY,
   sceneState: INITIAL_SCENE_STATE,
@@ -176,6 +276,7 @@ export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
       heroModels: {},
       fxLayers: {},
       renderPipeline: null,
+      resourcePipeline: null,
       lightingPipeline: null,
       telemetry: INITIAL_TELEMETRY,
       sceneState: INITIAL_SCENE_STATE,
@@ -234,6 +335,10 @@ export const useViewportAuditStore = create<ViewportAuditState>((set) => ({
   reportRenderPipeline: (metric) =>
     set({
       renderPipeline: metric,
+    }),
+  reportResourcePipeline: (metric) =>
+    set({
+      resourcePipeline: metric,
     }),
   reportLightingPipeline: (metric) =>
     set({

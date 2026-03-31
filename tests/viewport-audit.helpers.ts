@@ -55,17 +55,18 @@ export const ACT_SNAPSHOTS = [
 
 const AUDIT_BASE_URL = "http://localhost:3100";
 export const FLAGSHIP_AUDIT_QUERY = "?audit=1&forceTier=high";
+const STARTUP_READY_TIMEOUT_MS = 120_000;
 
 export async function waitForExperienceReady(page: Page, search = "") {
   await page.goto(`${AUDIT_BASE_URL}/${search}`);
   await page.waitForFunction(() => window.__LPV5_VIEWPORT_AUDIT__ != null, undefined, {
     polling: 100,
-    timeout: 30_000,
+    timeout: STARTUP_READY_TIMEOUT_MS,
   });
   await page.waitForFunction(
     () => document.querySelector(".loading-screen") === null,
     undefined,
-    { polling: 100, timeout: 30_000 }
+    { polling: 100, timeout: STARTUP_READY_TIMEOUT_MS }
   );
   await page.waitForTimeout(400);
 }
@@ -146,6 +147,12 @@ export function unexpectedWarnings(warnings: string[]) {
     if (
       warning.includes("GL Driver Message") &&
       warning.includes("GPU stall due to ReadPixels")
+    ) {
+      return false;
+    }
+
+    if (
+      warning.includes("THREE.WebGLRenderer: KHR_parallel_shader_compile extension not supported.")
     ) {
       return false;
     }

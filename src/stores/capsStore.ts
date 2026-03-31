@@ -11,8 +11,11 @@ export interface Budgets {
   programs: number;
   points: number;
   textureMemoryMB: number;
+  jsHeapMB: number;
   loadTimeMs: number;
   frameTimeMs: number;
+  scrollLatencyMs: number;
+  maxLongTasks: number;
 }
 
 export interface RuntimeCaps {
@@ -49,14 +52,17 @@ const QUALITY_PROFILES: Record<
     budgets: {
       fps: 60,
       drawCalls: 80,
-      triangles: 280000,
-      geometries: 180,
-      textures: 48,
-      programs: 18,
-      points: 75000,
-      textureMemoryMB: 256,
-      loadTimeMs: 10000,
+      triangles: 240000,
+      geometries: 160,
+      textures: 32,
+      programs: 48,
+      points: 60000,
+      textureMemoryMB: 160,
+      jsHeapMB: 384,
+      loadTimeMs: 5000,
       frameTimeMs: 16.6,
+      scrollLatencyMs: 16.6,
+      maxLongTasks: 0,
     },
   },
   medium: {
@@ -70,11 +76,14 @@ const QUALITY_PROFILES: Record<
       triangles: 180000,
       geometries: 120,
       textures: 30,
-      programs: 14,
+      programs: 40,
       points: 28000,
       textureMemoryMB: 128,
-      loadTimeMs: 10000,
+      jsHeapMB: 320,
+      loadTimeMs: 6500,
       frameTimeMs: 16.6,
+      scrollLatencyMs: 16.6,
+      maxLongTasks: 1,
     },
   },
   low: {
@@ -91,8 +100,11 @@ const QUALITY_PROFILES: Record<
       programs: 10,
       points: 12000,
       textureMemoryMB: 64,
-      loadTimeMs: 10000,
+      jsHeapMB: 256,
+      loadTimeMs: 9000,
       frameTimeMs: 33.3,
+      scrollLatencyMs: 33.3,
+      maxLongTasks: 2,
     },
   },
 };
@@ -112,6 +124,21 @@ function buildCaps(
     enablePostProcessing: profile.enablePostProcessing,
     dpr: profile.dpr,
     budgets: profile.budgets,
+  };
+}
+
+function applyAuditCaps(caps: RuntimeCaps): RuntimeCaps {
+  return {
+    ...caps,
+    maxParticles: Math.min(caps.maxParticles, 12000),
+    enableShadows: false,
+    enablePostProcessing: false,
+    dpr: [0.8, 0.9],
+    budgets: {
+      ...caps.budgets,
+      drawCalls: Math.max(caps.budgets.drawCalls, 96),
+      programs: Math.max(caps.budgets.programs, 56),
+    },
   };
 }
 
@@ -147,6 +174,18 @@ function readForcedTier(): QualityTier | null {
   return null;
 }
 
+function isAuditMode(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return new URLSearchParams(window.location.search).get("audit") === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** Release a temporary WebGL context so it doesn't count against the browser limit */
 function releaseProbeContext(gl: WebGL2RenderingContext | null) {
   if (!gl) return;
@@ -178,6 +217,7 @@ export function detectCapabilities(): RuntimeCaps {
     prefersReducedMotion,
   };
   const forcedTier = readForcedTier();
+  const auditMode = isAuditMode();
 
   if (process.env.NODE_ENV !== "production") {
     if (forcedTier) {
@@ -188,10 +228,11 @@ export function detectCapabilities(): RuntimeCaps {
       // Override the startup budget to a generous value so the StartupReadiness-
       // Gate doesn't trigger safe-mode fallback before assets finish loading.
       caps.budgets = { ...caps.budgets, loadTimeMs: 30_000 };
-      return caps;
+      return auditMode ? applyAuditCaps(caps) : caps;
     }
     releaseProbeContext(gl);
-    return buildCaps("low", meta);
+    const caps = buildCaps("low", meta);
+    return auditMode ? applyAuditCaps(caps) : caps;
   }
 
   if (readSafeModeFlag()) {
@@ -201,7 +242,13 @@ export function detectCapabilities(): RuntimeCaps {
 
   if (forcedTier) {
     releaseProbeContext(gl);
-    return buildCaps(forcedTier, meta);
+    const caps = buildCaps(forcedTier, meta);
+    return auditMode ? applyAuditCaps(caps) : caps;
+  }
+
+  if (auditMode) {
+    releaseProbeContext(gl);
+    return applyAuditCaps(buildCaps("high", meta));
   }
 
   let tier: QualityTier = "medium";
@@ -271,6 +318,21 @@ export function detectCapabilities(): RuntimeCaps {
 
   releaseProbeContext(gl);
   return buildCaps(tier, meta);
+}
+
+export function resolveEffectiveQualityTier(
+  baseTier: QualityTier,
+  pressure: "nominal" | "elevated" | "critical" | null | undefined
+): QualityTier {
+  if (!pressure || pressure === "nominal") {
+    return baseTier;
+  }
+
+  if (pressure === "critical") {
+    return "low";
+  }
+
+  return baseTier === "low" ? "low" : "low";
 }
 
 function defaultCaps(tier: QualityTier): RuntimeCaps {

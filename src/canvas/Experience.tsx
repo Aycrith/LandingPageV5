@@ -9,6 +9,8 @@ import { CameraRig } from "./camera/CameraRig";
 import { PostProcessingStack } from "./postfx/PostProcessingStack";
 import { StartupReadinessGate } from "./StartupReadinessGate";
 import { SceneStartupController } from "./SceneStartupController";
+import { SceneWarmupHost } from "./SceneWarmupHost";
+import { ShaderWarmupHost } from "./ShaderWarmupHost";
 import { ViewportAuditProbe } from "./ViewportAuditProbe";
 import { PostFxErrorBoundary } from "./CanvasErrorBoundary";
 import { ACT_VIEWPORT_PROFILES } from "./viewportProfiles";
@@ -37,6 +39,8 @@ export default function Experience() {
   const hasFallbackTriggered = useSceneLoadStore((s) => s.hasFallbackTriggered);
 
   useEffect(() => {
+    useUIStore.getState().reset();
+    useSceneLoadStore.getState().resetStartup();
     const detected = detectCapabilities();
     setCaps(detected);
     resetViewportAudit();
@@ -120,7 +124,9 @@ export default function Experience() {
           }
         }}
       >
+        <ShaderWarmupHost />
         <SceneStartupController />
+        <SceneWarmupHost />
         <StartupReadinessGate />
         <ViewportAuditProbe />
         {process.env.NODE_ENV === "development" && <SceneDigest />}

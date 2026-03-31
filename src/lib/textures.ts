@@ -19,6 +19,8 @@ interface CachedTexture {
 
 const loader = new THREE.TextureLoader();
 const textureCache = new Map<string, CachedTexture>();
+const EMPTY_TEXTURE_DATA_URI =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 
 function createTextureKey(
   url: string,
@@ -182,6 +184,18 @@ export function useRepeatingTexture(
   options: Omit<SharedTextureOptions, "wrapS" | "wrapT"> = {}
 ): THREE.Texture {
   return useSharedTexture(url, {
+    ...options,
+    wrapS: THREE.RepeatWrapping,
+    wrapT: THREE.RepeatWrapping,
+  });
+}
+
+export function useOptionalRepeatingTexture(
+  url: string | null,
+  options: Omit<SharedTextureOptions, "wrapS" | "wrapT"> = {}
+) {
+  const resolvedUrl = url ?? EMPTY_TEXTURE_DATA_URI;
+  return useSharedTexture(resolvedUrl, {
     ...options,
     wrapS: THREE.RepeatWrapping,
     wrapT: THREE.RepeatWrapping,

@@ -8,6 +8,9 @@ import {
 } from "./viewport-audit.helpers";
 
 const AUDIT_BASE_URL = "http://localhost:3100";
+const ENTRY_WARMUP_MIN_ACTS = 2;
+const STARTUP_READY_BUDGET_MS = 5_000;
+const MAX_OVER_33_SCROLL_FRAMES = 2;
 
 test.describe("viewport audit stability", () => {
   test("holds frame times, survives a 30 second idle, and stays stable across a full scroll sweep", async ({
@@ -47,10 +50,25 @@ test.describe("viewport audit stability", () => {
     expect(idleSnapshot).not.toBeNull();
     expect(idleSnapshot?.isContextLost).toBeFalsy();
     expect(idleSnapshot?.metrics.telemetry.assetManifestReady).toBe(true);
+    expect(idleSnapshot?.metrics.telemetry.nearScrollReady).toBe(true);
     expect(idleSnapshot?.metrics.telemetry.warmupReady).toBe(true);
+    expect(idleSnapshot?.metrics.telemetry.compileReady).toBe(true);
+    expect(idleSnapshot?.metrics.telemetry.gpuWarmupReady).toBe(true);
+    expect(idleSnapshot?.metrics.telemetry.warmupActCount ?? 0).toBeGreaterThanOrEqual(
+      ENTRY_WARMUP_MIN_ACTS
+    );
+    expect(idleSnapshot?.metrics.telemetry.warmedActs ?? []).toEqual(
+      expect.arrayContaining([0, 1])
+    );
     expect(idleSnapshot?.metrics.telemetry.startupPhase).toBe("ready");
     expect(idleSnapshot?.metrics.telemetry.lateRequestCount).toBe(0);
+    expect(idleSnapshot?.metrics.telemetry.hasFallbackTriggered).toBe(false);
+    expect(
+      idleSnapshot?.metrics.telemetry.startupPhaseTimings.readyMs ??
+        Number.POSITIVE_INFINITY
+    ).toBeLessThanOrEqual(STARTUP_READY_BUDGET_MS);
     expect(idleSnapshot?.metrics.renderPipeline).toBeTruthy();
+    expect(idleSnapshot?.metrics.resourcePipeline).toBeTruthy();
     expect(idleSnapshot?.metrics.renderPipeline?.samples ?? 0).toBeGreaterThan(30);
     expect(
       idleSnapshot?.metrics.renderPipeline?.meanCpuMs ?? Number.POSITIVE_INFINITY
@@ -60,15 +78,23 @@ test.describe("viewport audit stability", () => {
     expect(
       idleSnapshot?.metrics.renderPipeline?.p95CpuMs ?? Number.POSITIVE_INFINITY
     ).toBeLessThan(12);
+    expect(
+      idleSnapshot?.metrics.renderPipeline?.p95ScrollLatencyMs ??
+        Number.POSITIVE_INFINITY
+    ).toBeLessThanOrEqual(16.6);
+    expect(idleSnapshot?.metrics.renderPipeline?.over33ScrollLatencyMs ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(MAX_OVER_33_SCROLL_FRAMES);
+    expect(idleSnapshot?.metrics.renderPipeline?.longTasks.count ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.calls ?? 0).toBeGreaterThan(0);
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.triangles ?? 0).toBeGreaterThan(0);
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.geometries ?? 0).toBeGreaterThan(0);
     expect(idleSnapshot?.metrics.renderPipeline?.renderer.textures ?? 0).toBeGreaterThan(0);
-    // Hard budget assertions — must stay under triangle/draw-call limits
-    expect(idleSnapshot?.metrics.renderPipeline?.renderer.triangles ?? Number.POSITIVE_INFINITY)
-      .toBeLessThanOrEqual(280000);
-    expect(idleSnapshot?.metrics.renderPipeline?.renderer.calls ?? Number.POSITIVE_INFINITY)
-      .toBeLessThanOrEqual(80);
+    expect(idleSnapshot?.metrics.renderPipeline?.budget.violations ?? []).toEqual([]);
+    expect(idleSnapshot?.metrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
+    expect(idleSnapshot?.metrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
 
     const idleHeap = await sampleHeap(page);
     if (initialHeap != null && idleHeap != null) {
@@ -83,7 +109,18 @@ test.describe("viewport audit stability", () => {
     expect(postSweep).not.toBeNull();
     expect(postSweep?.isContextLost).toBeFalsy();
     expect(postSweep?.metrics.telemetry.lateRequestCount).toBe(0);
+    expect(postSweep?.metrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
+    expect(postSweep?.metrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
     expect(postSweep?.metrics.renderPipeline).toBeTruthy();
+    expect(postSweep?.metrics.renderPipeline?.postReadyRendererDrift?.programs ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
+    expect(postSweep?.metrics.renderPipeline?.postReadyRendererDrift?.geometries ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
+    expect(postSweep?.metrics.renderPipeline?.postReadyRendererDrift?.textures ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
+    expect(postSweep?.metrics.renderPipeline?.budget.violations ?? []).toEqual([]);
 
     for (const progress of [0.06, 0.26, 0.46, 0.66, 0.86, 0.06]) {
       await setAuditProgress(page, progress);
@@ -93,7 +130,18 @@ test.describe("viewport audit stability", () => {
     expect(repeatedSweep).not.toBeNull();
     expect(repeatedSweep?.isContextLost).toBeFalsy();
     expect(repeatedSweep?.metrics.telemetry.lateRequestCount).toBe(0);
+    expect(repeatedSweep?.metrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
+    expect(repeatedSweep?.metrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
     expect(repeatedSweep?.metrics.renderPipeline).toBeTruthy();
+    expect(repeatedSweep?.metrics.renderPipeline?.postReadyRendererDrift?.programs ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
+    expect(repeatedSweep?.metrics.renderPipeline?.postReadyRendererDrift?.geometries ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
+    expect(repeatedSweep?.metrics.renderPipeline?.postReadyRendererDrift?.textures ?? Number.POSITIVE_INFINITY)
+      .toBeLessThanOrEqual(0);
+    expect(repeatedSweep?.metrics.renderPipeline?.budget.violations ?? []).toEqual([]);
 
     if (postSweep?.metrics.renderPipeline && repeatedSweep?.metrics.renderPipeline) {
       expect(repeatedSweep.metrics.renderPipeline.renderer.geometries).toBeLessThanOrEqual(
@@ -123,11 +171,12 @@ test.describe("viewport audit stability", () => {
       const snapshot = await sampleCanvas(page);
       expect(snapshot?.isContextLost).toBeFalsy();
       expect(snapshot?.metrics.telemetry.lateRequestCount).toBe(0);
+      expect(snapshot?.metrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY)
+        .toBe(0);
+      expect(snapshot?.metrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY)
+        .toBe(0);
       if (snapshot?.metrics.renderPipeline) {
-        expect(snapshot.metrics.renderPipeline.renderer.triangles)
-          .toBeLessThanOrEqual(280000);
-        expect(snapshot.metrics.renderPipeline.renderer.calls)
-          .toBeLessThanOrEqual(80);
+        expect(snapshot.metrics.renderPipeline.budget.violations).toEqual([]);
       }
     }
 
@@ -146,8 +195,22 @@ test.describe("viewport audit stability", () => {
     const firstVisible = await sampleCanvas(page);
     expect(firstVisible?.metrics.telemetry.startupPhase).toBe("ready");
     expect(firstVisible?.metrics.telemetry.assetManifestReady).toBe(true);
+    expect(firstVisible?.metrics.telemetry.nearScrollReady).toBe(true);
     expect(firstVisible?.metrics.telemetry.warmupReady).toBe(true);
+    expect(firstVisible?.metrics.telemetry.compileReady).toBe(true);
+    expect(firstVisible?.metrics.telemetry.warmupActCount ?? 0).toBeGreaterThanOrEqual(
+      ENTRY_WARMUP_MIN_ACTS
+    );
     expect(firstVisible?.metrics.telemetry.lateRequestCount).toBe(0);
+    expect(
+      firstVisible?.metrics.telemetry.startupPhaseTimings.readyMs ??
+        Number.POSITIVE_INFINITY
+    ).toBeLessThanOrEqual(STARTUP_READY_BUDGET_MS);
+    expect(firstVisible?.metrics.telemetry.hasFallbackTriggered).toBe(false);
+    expect(firstVisible?.metrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
+    expect(firstVisible?.metrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY)
+      .toBe(0);
 
     for (const progress of [0.22, 0.55, 0.72, 0.9]) {
       await setAuditProgress(page, progress);
@@ -155,10 +218,17 @@ test.describe("viewport audit stability", () => {
       expect(snapshot?.isContextLost).toBeFalsy();
       expect(snapshot?.metrics.telemetry.startupPhase).toBe("ready");
       expect(snapshot?.metrics.telemetry.lateRequestCount).toBe(0);
-      expect(snapshot?.metrics.renderPipeline?.renderer.calls ?? Number.POSITIVE_INFINITY)
-        .toBeLessThanOrEqual(80);
-      expect(snapshot?.metrics.renderPipeline?.renderer.triangles ?? Number.POSITIVE_INFINITY)
-        .toBeLessThanOrEqual(280000);
+      expect(snapshot?.metrics.resourcePipeline?.lateEntryCriticalCount ?? Number.POSITIVE_INFINITY)
+        .toBe(0);
+      expect(snapshot?.metrics.resourcePipeline?.lateNearScrollCount ?? Number.POSITIVE_INFINITY)
+        .toBe(0);
+      expect(snapshot?.metrics.renderPipeline?.postReadyRendererDrift?.programs ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(0);
+      expect(snapshot?.metrics.renderPipeline?.postReadyRendererDrift?.geometries ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(0);
+      expect(snapshot?.metrics.renderPipeline?.postReadyRendererDrift?.textures ?? Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(0);
+      expect(snapshot?.metrics.renderPipeline?.budget.violations ?? []).toEqual([]);
     }
   });
 

@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { type QualityTier } from "@/stores/capsStore";
 import { useCursorStore } from "@/stores/cursorStore";
-import { useSceneLoadStore } from "@/stores/sceneLoadStore";
+import { useScrollStore } from "@/stores/scrollStore";
 import { useViewportAuditStore } from "@/stores/viewportAuditStore";
 import { useRepeatingTexture } from "@/lib/textures";
 import { seededUnit } from "@/lib/random";
@@ -16,16 +16,27 @@ import {
   type DetailLod,
 } from "@/lib/scene";
 import { CuratedHeroLayer } from "./CuratedHeroLayer";
-import { VolumetricUI } from "./VolumetricUI";
-import { resolveMountedActs } from "./runtimeMounting";
+import { StaticVolumetricUI, VolumetricUI } from "./VolumetricUI";
 import { WORLD_PHASES } from "./viewportProfiles";
 import { VoidParticleField } from "./particles/VoidParticleField";
 import { computeActPresence, computeCrossfadeBlend } from "@/lib/transition";
+import {
+  WorldMotionProvider,
+  copyWorldMotionSnapshot,
+  createWorldMotionSnapshot,
+  type WorldMotionSnapshot,
+} from "./worldMotion";
 
 interface SeamlessWorldProps {
-  activeAct: number;
-  phaseBlend: number;
+  mountedHeroActIndices: number[];
+  mountedFxActIndices: number[];
   tier: QualityTier;
+  snapshotOverride?: WorldMotionSnapshot | null;
+  auditEnabled?: boolean;
+  warmupVisibleUi?: boolean;
+  includeActFx?: boolean;
+  showAmbientParticles?: boolean;
+  includeWarmedHeroActs?: boolean;
 }
 
 function wrapNext(index: number) {
@@ -72,62 +83,17 @@ function createCirculationConduit(offset: number) {
 }
 
 export function SeamlessWorld({
-  activeAct,
-  phaseBlend,
+  mountedHeroActIndices,
+  mountedFxActIndices,
   tier,
+  snapshotOverride = null,
+  auditEnabled = true,
+  warmupVisibleUi = false,
+  includeActFx = true,
+  showAmbientParticles = true,
+  includeWarmedHeroActs = false,
 }: SeamlessWorldProps) {
-  const warmupActIndex = useSceneLoadStore((state) => state.warmupActIndex);
-  const warmupReady = useSceneLoadStore((state) => state.warmupReady);
-  const resolvedActiveAct = activeAct;
-  const effectivePhaseBlend = phaseBlend;
-  const nextAct = wrapNext(activeAct);
-  const currentProfile = WORLD_PHASES[resolvedActiveAct];
-  const nextProfile = WORLD_PHASES[nextAct];
-  const rebirthThreshold =
-    resolvedActiveAct === WORLD_PHASES.length - 1
-      ? currentProfile.transitionRig.rebirth
-      : 1;
-  const rebirthBlend =
-    resolvedActiveAct === WORLD_PHASES.length - 1
-      ? smoothWeight(
-          (effectivePhaseBlend - rebirthThreshold) / (1 - rebirthThreshold)
-        )
-      : 0;
-  const mountedActIndices = useMemo(
-    () =>
-      resolveMountedActs({
-        activeAct: resolvedActiveAct,
-        totalActs: WORLD_PHASES.length,
-        warmupActIndex,
-        warmupReady,
-        rebirthBlend,
-      }),
-    [rebirthBlend, resolvedActiveAct, warmupActIndex, warmupReady]
-  );
-  const metricActIndex =
-    activeAct === WORLD_PHASES.length - 1 && rebirthBlend > 0.46 ? 0 : activeAct;
-
-  const weights = useMemo(() => {
-    // Ensure the array always has at least 6 slots for Act 6 support
-    const len = Math.max(WORLD_PHASES.length, 6);
-    const list = Array.from({ length: len }, () => 0);
-    const currentWeight = computeActPresence(
-      effectivePhaseBlend,
-      currentProfile.transitionRig
-    );
-    const crossfade = computeCrossfadeBlend(
-      effectivePhaseBlend,
-      currentProfile.transitionRig
-    );
-    list[resolvedActiveAct] = currentWeight;
-    list[nextAct] = crossfade;
-    return list;
-  }, [
-    currentProfile.transitionRig,
-    effectivePhaseBlend,
-    nextAct,
-    resolvedActiveAct,
-  ]);
+  const motionRef = useRef(createWorldMotionSnapshot());
 
   // Sentience bridge: curved arc spanning the dual poles
   const sentienceBridgeCurve = useMemo(
@@ -163,12 +129,16 @@ export function SeamlessWorld({
   const worldLodRef = useRef<DetailLod | null>(null);
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
-  const worldAnchor = useMemo(() => new THREE.Vector3(), []);
-  const pointerOffset = useMemo(() => new THREE.Vector3(), []);
   const fogColor = useMemo(() => new THREE.Color(), []);
+  const fogColorNext = useMemo(() => new THREE.Color(), []);
   const fogSecondary = useMemo(() => new THREE.Color(), []);
+  const fogSecondaryNext = useMemo(() => new THREE.Color(), []);
   const sporeColorLerp = useMemo(() => new THREE.Color(), []);
   const sporeColorNext = useMemo(() => new THREE.Color(), []);
+  const sentienceBridgeOffset = useMemo(
+    () => new THREE.Vector3(0, -0.14, -0.12),
+    []
+  );
   const baseSporePositionsRef = useRef<Float32Array | null>(null);
   const noiseTexture = useRepeatingTexture(
     "/textures/volumetric/nebula-noise-1k-seamless.png",
@@ -245,42 +215,95 @@ export function SeamlessWorld({
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    const cursor = useCursorStore.getState();
+    const cursor = snapshotOverride
+      ? { x: 0.5, y: 0.5 }
+      : useCursorStore.getState();
+    const motion = motionRef.current;
+    const frameActiveAct = snapshotOverride
+      ? snapshotOverride.activeAct
+      : useScrollStore.getState().activeAct;
+    const frameNextAct = snapshotOverride
+      ? snapshotOverride.nextAct
+      : wrapNext(frameActiveAct);
+    const frameCurrentProfile = WORLD_PHASES[frameActiveAct];
+    const frameNextProfile = WORLD_PHASES[frameNextAct];
+    const phaseBlend = snapshotOverride
+      ? snapshotOverride.phaseBlend
+      : useScrollStore.getState().actProgress;
+    const currentWeight = snapshotOverride
+      ? snapshotOverride.weights[frameActiveAct] ?? 0
+      : computeActPresence(phaseBlend, frameCurrentProfile.transitionRig);
+    const crossfade = snapshotOverride
+      ? snapshotOverride.weights[frameNextAct] ?? 0
+      : computeCrossfadeBlend(phaseBlend, frameCurrentProfile.transitionRig);
+    const rebirthBlend = snapshotOverride
+      ? snapshotOverride.rebirthBlend
+      : frameActiveAct === WORLD_PHASES.length - 1
+        ? smoothWeight(
+            (phaseBlend - frameCurrentProfile.transitionRig.rebirth) /
+              (1 - frameCurrentProfile.transitionRig.rebirth)
+          )
+        : 0;
+    const weights = motion.weights;
+    const worldAnchor = motion.worldAnchor;
+    const pointerOffset = motion.pointerOffset;
+
+    if (snapshotOverride) {
+      copyWorldMotionSnapshot(motion, snapshotOverride);
+    } else {
+      weights.fill(0);
+      weights[frameActiveAct] = currentWeight;
+      weights[frameNextAct] = crossfade;
+      if (frameActiveAct === WORLD_PHASES.length - 1) {
+        weights[0] += rebirthBlend;
+      }
+
+      motion.activeAct = frameActiveAct;
+      motion.nextAct = frameNextAct;
+      motion.metricActIndex =
+        frameActiveAct === WORLD_PHASES.length - 1 && rebirthBlend > 0.46
+          ? 0
+          : frameActiveAct;
+      motion.phaseBlend = phaseBlend;
+      motion.rebirthBlend = rebirthBlend;
+    }
+
     const metabolism =
-      currentProfile.motionRig.metabolism * (1 - effectivePhaseBlend) +
-      nextProfile.motionRig.metabolism * effectivePhaseBlend;
+      frameCurrentProfile.motionRig.metabolism * (1 - phaseBlend) +
+      frameNextProfile.motionRig.metabolism * phaseBlend;
     const pointerStrength =
-      currentProfile.motionRig.pointerInfluence * (1 - effectivePhaseBlend) +
-      nextProfile.motionRig.pointerInfluence * effectivePhaseBlend;
-    const currentWeight = weights[resolvedActiveAct];
-    const seedWeight = weights[0] + rebirthBlend;
+      frameCurrentProfile.motionRig.pointerInfluence * (1 - phaseBlend) +
+      frameNextProfile.motionRig.pointerInfluence * phaseBlend;
+    const seedWeight = weights[0];
     const scaffoldWeight = weights[1];
     const circulationWeight = weights[2];
     const sentienceWeight = weights[3];
     const apotheosisWeight = weights[4];
 
-    worldAnchor.set(
-      THREE.MathUtils.lerp(
-        currentProfile.worldAnchor[0],
-        nextProfile.worldAnchor[0],
-        effectivePhaseBlend
-      ),
-      THREE.MathUtils.lerp(
-        currentProfile.worldAnchor[1],
-        nextProfile.worldAnchor[1],
-        effectivePhaseBlend
-      ),
-      THREE.MathUtils.lerp(
-        currentProfile.worldAnchor[2],
-        nextProfile.worldAnchor[2],
-        effectivePhaseBlend
-      )
-    );
-    pointerOffset.set(
-      (cursor.x - 0.5) * pointerStrength,
-      (0.5 - cursor.y) * pointerStrength * 0.7,
-      0
-    );
+    if (!snapshotOverride) {
+      worldAnchor.set(
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.worldAnchor[0],
+          frameNextProfile.worldAnchor[0],
+          phaseBlend
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.worldAnchor[1],
+          frameNextProfile.worldAnchor[1],
+          phaseBlend
+        ),
+        THREE.MathUtils.lerp(
+          frameCurrentProfile.worldAnchor[2],
+          frameNextProfile.worldAnchor[2],
+          phaseBlend
+        )
+      );
+      pointerOffset.set(
+        (cursor.x - 0.5) * pointerStrength,
+        (0.5 - cursor.y) * pointerStrength * 0.7,
+        0
+      );
+    }
 
     const cursorCenterDist = Math.sqrt(
       Math.pow(cursor.x - 0.5, 2) + Math.pow(cursor.y - 0.5, 2)
@@ -290,9 +313,9 @@ export function SeamlessWorld({
     const worldDistance = worldAnchor.distanceTo(camera.position);
     const visibleHeight = getViewportHeightAtDistance(worldDistance, camera.fov);
     const stageHeight = THREE.MathUtils.lerp(
-      currentProfile.stageVolume.height,
-      nextProfile.stageVolume.height,
-      effectivePhaseBlend
+      frameCurrentProfile.stageVolume.height,
+      frameNextProfile.stageVolume.height,
+      phaseBlend
     );
     const worldFillRatio = computeViewportFillRatio(stageHeight * 0.52, 1, visibleHeight);
     const worldLod = resolveDetailLod({
@@ -307,7 +330,7 @@ export function SeamlessWorld({
     const shadowLodMultiplier =
       worldLod === "cinematic" ? 1 : worldLod === "balanced" ? 0.82 : 0.6;
 
-    if (worldLodRef.current !== worldLod) {
+    if (auditEnabled && worldLodRef.current !== worldLod) {
       worldLodRef.current = worldLod;
       useViewportAuditStore.getState().reportSceneState({ activeWorldLod: worldLod });
     }
@@ -317,14 +340,11 @@ export function SeamlessWorld({
     }
 
     fogColor
-      .set(currentProfile.fogProfile.color)
-      .lerp(new THREE.Color(nextProfile.fogProfile.color), effectivePhaseBlend);
+      .set(frameCurrentProfile.fogProfile.color)
+      .lerp(fogColorNext.set(frameNextProfile.fogProfile.color), phaseBlend);
     fogSecondary
-      .set(currentProfile.fogProfile.secondaryColor)
-      .lerp(
-        new THREE.Color(nextProfile.fogProfile.secondaryColor),
-        effectivePhaseBlend
-      );
+      .set(frameCurrentProfile.fogProfile.secondaryColor)
+      .lerp(fogSecondaryNext.set(frameNextProfile.fogProfile.secondaryColor), phaseBlend);
 
     if (fogFarRef.current) {
       fogFarRef.current.position.copy(worldAnchor);
@@ -345,27 +365,27 @@ export function SeamlessWorld({
       fogFarMaterialRef.current.color.copy(fogSecondary);
       fogFarMaterialRef.current.opacity =
         THREE.MathUtils.lerp(
-          currentProfile.fogProfile.layerOpacity,
-          nextProfile.fogProfile.layerOpacity,
-          effectivePhaseBlend
+          frameCurrentProfile.fogProfile.layerOpacity,
+          frameNextProfile.fogProfile.layerOpacity,
+          phaseBlend
         ) * 0.72 * fogLodMultiplier;
     }
     if (fogNearMaterialRef.current) {
       fogNearMaterialRef.current.color.copy(fogColor);
       fogNearMaterialRef.current.opacity =
         THREE.MathUtils.lerp(
-          currentProfile.fogProfile.layerOpacity,
-          nextProfile.fogProfile.layerOpacity,
-          effectivePhaseBlend
+          frameCurrentProfile.fogProfile.layerOpacity,
+          frameNextProfile.fogProfile.layerOpacity,
+          phaseBlend
         ) * 0.54 * fogLodMultiplier;
     }
     if (fogFrontMaterialRef.current) {
       fogFrontMaterialRef.current.color.copy(fogColor);
       fogFrontMaterialRef.current.opacity =
         THREE.MathUtils.lerp(
-          currentProfile.fogProfile.foregroundOpacity,
-          nextProfile.fogProfile.foregroundOpacity,
-          effectivePhaseBlend
+          frameCurrentProfile.fogProfile.foregroundOpacity,
+          frameNextProfile.fogProfile.foregroundOpacity,
+          phaseBlend
         ) * 0.6 * fogLodMultiplier;
     }
 
@@ -430,7 +450,7 @@ export function SeamlessWorld({
 
     if (sentienceBridgeRef.current) {
       sentienceBridgeRef.current.visible = sentienceWeight > 0.005;
-      sentienceBridgeRef.current.position.copy(worldAnchor).add(new THREE.Vector3(0, -0.14, -0.12));
+      sentienceBridgeRef.current.position.copy(worldAnchor).add(sentienceBridgeOffset);
       sentienceBridgeRef.current.scale.x = 1.2 + sentienceWeight * 1.2;
       sentienceBridgeRef.current.scale.y = 0.3 + Math.abs(Math.sin(t * 0.8)) * 0.5 * sentienceWeight;
       const material =
@@ -500,14 +520,15 @@ export function SeamlessWorld({
       sporesRef.current.geometry.attributes.position.needsUpdate = true;
       const material = sporesRef.current.material as THREE.PointsMaterial;
       material.opacity =
-        currentProfile.ambientParticleMode === "none" && nextProfile.ambientParticleMode === "none"
+        frameCurrentProfile.ambientParticleMode === "none" &&
+        frameNextProfile.ambientParticleMode === "none"
           ? 0
           : (0.06 + currentWeight * 0.05) * particleLodMultiplier;
       material.size = (worldLod === "streamlined" ? 0.03 : 0.035) + currentWeight * 0.002;
-      sporeColorNext.set(nextProfile.accent);
+      sporeColorNext.set(frameNextProfile.accent);
       sporeColorLerp
-        .set(currentProfile.accent)
-        .lerp(sporeColorNext, effectivePhaseBlend);
+        .set(frameCurrentProfile.accent)
+        .lerp(sporeColorNext, phaseBlend);
       material.color.copy(sporeColorLerp);
     }
 
@@ -515,29 +536,30 @@ export function SeamlessWorld({
       shadowPlaneRef.current.position.set(
         worldAnchor.x,
         THREE.MathUtils.lerp(
-          currentProfile.shadowProfile.receiverY,
-          nextProfile.shadowProfile.receiverY,
-          effectivePhaseBlend
+          frameCurrentProfile.shadowProfile.receiverY,
+          frameNextProfile.shadowProfile.receiverY,
+          phaseBlend
         ),
         worldAnchor.z
       );
       shadowPlaneRef.current.scale.setScalar(
         THREE.MathUtils.lerp(
-          currentProfile.shadowProfile.radius,
-          nextProfile.shadowProfile.radius,
-          effectivePhaseBlend
+          frameCurrentProfile.shadowProfile.radius,
+          frameNextProfile.shadowProfile.radius,
+          phaseBlend
         )
       );
     }
     if (shadowMaterialRef.current) {
       const shadowEnabled =
         tier === "high" &&
-        (currentProfile.shadowProfile.enabled || nextProfile.shadowProfile.enabled);
+        (frameCurrentProfile.shadowProfile.enabled ||
+          frameNextProfile.shadowProfile.enabled);
       shadowMaterialRef.current.opacity = shadowEnabled
         ? THREE.MathUtils.lerp(
-            currentProfile.shadowProfile.opacity,
-            nextProfile.shadowProfile.opacity,
-            effectivePhaseBlend
+            frameCurrentProfile.shadowProfile.opacity,
+            frameNextProfile.shadowProfile.opacity,
+            phaseBlend
           ) * shadowLodMultiplier
         : 0;
     }
@@ -546,239 +568,243 @@ export function SeamlessWorld({
     if (noiseTex) {
       noiseTex.offset.x +=
         THREE.MathUtils.lerp(
-          currentProfile.fogProfile.drift,
-          nextProfile.fogProfile.drift,
-          effectivePhaseBlend
+          frameCurrentProfile.fogProfile.drift,
+          frameNextProfile.fogProfile.drift,
+          phaseBlend
         ) * 0.0009;
       noiseTex.offset.y += 0.00025;
     }
   });
 
   return (
-    <group scale={0.82} position={[0, -0.14, -0.16]}>
-      <mesh ref={chamberRef}>
-        <sphereGeometry args={[20, 48, 48]} />
-        <meshBasicMaterial color="#010305" side={THREE.BackSide} />
-      </mesh>
+    <WorldMotionProvider motionRef={motionRef}>
+      <group scale={0.82} position={[0, -0.14, -0.16]}>
+        <mesh ref={chamberRef}>
+          <sphereGeometry args={[20, 48, 48]} />
+          <meshBasicMaterial color="#010305" side={THREE.BackSide} />
+        </mesh>
 
-      {tier !== "low" && (
-        <group ref={fogFarRef}>
-          <mesh position={[0, 0.4, 0]} scale={[12.4, 12.4, 1]}>
+        {tier !== "low" && (
+          <group ref={fogFarRef}>
+            <mesh position={[0, 0.4, 0]} scale={[12.4, 12.4, 1]}>
+              <planeGeometry args={[1, 1, 1, 1]} />
+              <meshBasicMaterial
+                ref={fogFarMaterialRef}
+                map={noiseTexture}
+                alphaMap={noiseTexture}
+                color="#081018"
+                transparent
+                opacity={0.14}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+                toneMapped={false}
+              />
+            </mesh>
+          </group>
+        )}
+
+        <group ref={fogNearRef}>
+          <mesh position={[0, 0, 0]} scale={[8.8, 8.8, 1]}>
             <planeGeometry args={[1, 1, 1, 1]} />
             <meshBasicMaterial
-              ref={fogFarMaterialRef}
+              ref={fogNearMaterialRef}
               map={noiseTexture}
               alphaMap={noiseTexture}
-              color="#081018"
+              color="#7cf7f1"
               transparent
-              opacity={0.14}
+              opacity={0.1}
               depthWrite={false}
               blending={THREE.AdditiveBlending}
+              toneMapped={false}
+            />
+          </mesh>
+          {tier !== "low" && (
+            <mesh position={[-2.6, -1.1, 1.4]} scale={[5.6, 5.6, 1]}>
+              <planeGeometry args={[1, 1, 1, 1]} />
+              <meshBasicMaterial
+                ref={fogFrontMaterialRef}
+                map={noiseTexture}
+                alphaMap={noiseTexture}
+                color="#9deee6"
+                transparent
+                opacity={0.06}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+                toneMapped={false}
+              />
+            </mesh>
+          )}
+        </group>
+
+        <points ref={sporesRef} geometry={sporeGeometry}>
+          <pointsMaterial
+            color="#bff8ef"
+            size={0.035}
+            sizeAttenuation
+            transparent
+            opacity={0.08}
+            depthWrite={false}
+          />
+        </points>
+
+        <mesh ref={shadowPlaneRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          <circleGeometry args={[1, 48]} />
+          <shadowMaterial
+            ref={shadowMaterialRef}
+            transparent
+            opacity={0}
+            color="#000000"
+          />
+        </mesh>
+
+        <group ref={seedGroupRef}>
+          <mesh rotation={[Math.PI / 2, 0.16, 0]}>
+            <torusGeometry args={[1.2, 0.032, 16, 96]} />
+            <meshBasicMaterial
+              color="#b7fff4"
+              transparent
+              opacity={0.18}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+          <mesh rotation={[Math.PI / 2.2, 0.38, 0.18]}>
+            <torusGeometry args={[1.7, 0.022, 14, 96]} />
+            <meshBasicMaterial
+              color="#8ff4de"
+              transparent
+              opacity={0.12}
+              depthWrite={false}
               toneMapped={false}
             />
           </mesh>
         </group>
-      )}
 
-      <group ref={fogNearRef}>
-        <mesh position={[0, 0, 0]} scale={[8.8, 8.8, 1]}>
-          <planeGeometry args={[1, 1, 1, 1]} />
-          <meshBasicMaterial
-            ref={fogNearMaterialRef}
-            map={noiseTexture}
-            alphaMap={noiseTexture}
-            color="#7cf7f1"
+        <group ref={scaffoldGroupRef}>
+          {scaffoldRibs.map((geometry, index) => (
+            <mesh key={index} geometry={geometry}>
+              <meshPhysicalMaterial
+                color="#90d7ff"
+                emissive="#b9ebff"
+                emissiveIntensity={0.1}
+                transparent
+                opacity={0.16}
+                transmission={tier === "high" ? 0.92 : 0}
+                thickness={1.2}
+                metalness={0.04}
+                roughness={0.06}
+                iridescence={tier !== "low" ? 0.44 : 0}
+                iridescenceIOR={1.6}
+                depthWrite={false}
+              />
+            </mesh>
+          ))}
+          <instancedMesh ref={scaffoldNodesRef} args={[undefined, undefined, scaffoldNodes.length]}>
+            <sphereGeometry args={[1, 10, 10]} />
+            <meshPhysicalMaterial
+              color="#dff6ff"
+              emissive="#8dcfff"
+              emissiveIntensity={0.2}
+              transparent
+              opacity={0.32}
+              transmission={tier === "high" ? 0.6 : 0}
+              thickness={0.8}
+              metalness={0.32}
+              roughness={0.08}
+              iridescence={tier !== "low" ? 0.28 : 0}
+              iridescenceIOR={1.4}
+            />
+          </instancedMesh>
+        </group>
+
+        <group ref={circulationGroupRef}>
+          {circulationConduits.map((geometry, index) => (
+            <mesh key={index} geometry={geometry}>
+              <meshPhysicalMaterial
+                color="#8ef3eb"
+                emissive="#b8fffb"
+                emissiveIntensity={0.24}
+                transparent
+                opacity={0.16}
+                transmission={tier === "high" ? 0.3 : 0}
+                thickness={0.2}
+                metalness={0.24}
+                roughness={0.2}
+                depthWrite={false}
+              />
+            </mesh>
+          ))}
+        </group>
+
+        <mesh ref={sentienceBridgeRef}>
+          <tubeGeometry args={[sentienceBridgeCurve, 32, 0.04, 8, false]} />
+          <meshPhysicalMaterial
+            color="#f6c86a"
+            emissive="#ffd06f"
+            emissiveIntensity={0.24}
             transparent
-            opacity={0.1}
+            opacity={0.24}
+            transmission={tier === "high" ? 0.54 : 0}
+            thickness={0.58}
+            roughness={0.12}
             depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            toneMapped={false}
           />
         </mesh>
-        {tier !== "low" && (
-          <mesh position={[-2.6, -1.1, 1.4]} scale={[5.6, 5.6, 1]}>
-            <planeGeometry args={[1, 1, 1, 1]} />
+
+        <group ref={apotheosisGroupRef}>
+          <mesh ref={crownRingRef} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[2.5, 0.04, 18, 96]} />
             <meshBasicMaterial
-              ref={fogFrontMaterialRef}
-              map={noiseTexture}
-              alphaMap={noiseTexture}
-              color="#9deee6"
+              color="#ffd5f1"
               transparent
-              opacity={0.06}
+              opacity={0.16}
               depthWrite={false}
-              blending={THREE.AdditiveBlending}
               toneMapped={false}
             />
           </mesh>
+          <mesh ref={crownSecondaryRef} rotation={[0.72, 0.18, 0]}>
+            <torusGeometry args={[1.9, 0.024, 12, 72]} />
+            <meshBasicMaterial
+              color="#ffb6df"
+              transparent
+              opacity={0.1}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+          <instancedMesh ref={crownSpinesRef} args={[undefined, undefined, crownSpines.length]}>
+            <cylinderGeometry args={[1, 1, 1, 12]} />
+            <meshStandardMaterial
+              color="#16101a"
+              emissive="#ffd2f0"
+              emissiveIntensity={0.26}
+              metalness={0.82}
+              roughness={0.16}
+            />
+          </instancedMesh>
+        </group>
+
+        {showAmbientParticles ? <VoidParticleField /> : null}
+
+        <Suspense fallback={null}>
+          <CuratedHeroLayer
+            mountedActIndices={mountedHeroActIndices}
+            mountedFxActIndices={mountedFxActIndices}
+            includeWarmedHeroActs={includeWarmedHeroActs}
+            auditEnabled={auditEnabled}
+            includeActFx={includeActFx}
+          />
+        </Suspense>
+
+        {snapshotOverride ? (
+          <StaticVolumetricUI
+            activeAct={snapshotOverride.activeAct}
+            warmupVisible={warmupVisibleUi}
+          />
+        ) : (
+          <VolumetricUI />
         )}
       </group>
-
-      <points ref={sporesRef} geometry={sporeGeometry}>
-        <pointsMaterial
-          color="#bff8ef"
-          size={0.035}
-          sizeAttenuation
-          transparent
-          opacity={0.08}
-          depthWrite={false}
-        />
-      </points>
-
-      <mesh ref={shadowPlaneRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[1, 48]} />
-        <shadowMaterial
-          ref={shadowMaterialRef}
-          transparent
-          opacity={0}
-          color="#000000"
-        />
-      </mesh>
-
-      <group ref={seedGroupRef}>
-        <mesh rotation={[Math.PI / 2, 0.16, 0]}>
-          <torusGeometry args={[1.2, 0.032, 16, 96]} />
-          <meshBasicMaterial
-            color="#b7fff4"
-            transparent
-            opacity={0.18}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh rotation={[Math.PI / 2.2, 0.38, 0.18]}>
-          <torusGeometry args={[1.7, 0.022, 14, 96]} />
-          <meshBasicMaterial
-            color="#8ff4de"
-            transparent
-            opacity={0.12}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
-
-      <group ref={scaffoldGroupRef}>
-        {scaffoldRibs.map((geometry, index) => (
-          <mesh key={index} geometry={geometry}>
-            <meshPhysicalMaterial
-              color="#90d7ff"
-              emissive="#b9ebff"
-              emissiveIntensity={0.1}
-              transparent
-              opacity={0.16}
-              transmission={tier === "high" ? 0.92 : 0}
-              thickness={1.2}
-              metalness={0.04}
-              roughness={0.06}
-              iridescence={tier !== "low" ? 0.44 : 0}
-              iridescenceIOR={1.6}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
-        <instancedMesh ref={scaffoldNodesRef} args={[undefined, undefined, scaffoldNodes.length]}>
-          <sphereGeometry args={[1, 10, 10]} />
-          <meshPhysicalMaterial
-            color="#dff6ff"
-            emissive="#8dcfff"
-            emissiveIntensity={0.2}
-            transparent
-            opacity={0.32}
-            transmission={tier === "high" ? 0.6 : 0}
-            thickness={0.8}
-            metalness={0.32}
-            roughness={0.08}
-            iridescence={tier !== "low" ? 0.28 : 0}
-            iridescenceIOR={1.4}
-          />
-        </instancedMesh>
-      </group>
-
-      <group ref={circulationGroupRef}>
-        {circulationConduits.map((geometry, index) => (
-          <mesh key={index} geometry={geometry}>
-            <meshPhysicalMaterial
-              color="#8ef3eb"
-              emissive="#b8fffb"
-              emissiveIntensity={0.24}
-              transparent
-              opacity={0.16}
-              transmission={tier === "high" ? 0.3 : 0}
-              thickness={0.2}
-              metalness={0.24}
-              roughness={0.2}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
-      </group>
-
-      <mesh ref={sentienceBridgeRef}>
-        <tubeGeometry args={[sentienceBridgeCurve, 32, 0.04, 8, false]} />
-        <meshPhysicalMaterial
-          color="#f6c86a"
-          emissive="#ffd06f"
-          emissiveIntensity={0.24}
-          transparent
-          opacity={0.24}
-          transmission={tier === "high" ? 0.54 : 0}
-          thickness={0.58}
-          roughness={0.12}
-          depthWrite={false}
-        />
-      </mesh>
-
-      <group ref={apotheosisGroupRef}>
-        <mesh ref={crownRingRef} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[2.5, 0.04, 18, 96]} />
-          <meshBasicMaterial
-            color="#ffd5f1"
-            transparent
-            opacity={0.16}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh ref={crownSecondaryRef} rotation={[0.72, 0.18, 0]}>
-          <torusGeometry args={[1.9, 0.024, 12, 72]} />
-          <meshBasicMaterial
-            color="#ffb6df"
-            transparent
-            opacity={0.1}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-        <instancedMesh ref={crownSpinesRef} args={[undefined, undefined, crownSpines.length]}>
-          <cylinderGeometry args={[1, 1, 1, 12]} />
-          <meshStandardMaterial
-            color="#16101a"
-            emissive="#ffd2f0"
-            emissiveIntensity={0.26}
-            metalness={0.82}
-            roughness={0.16}
-          />
-        </instancedMesh>
-      </group>
-
-      <VoidParticleField />
-
-      <Suspense fallback={null}>
-        <CuratedHeroLayer
-          metricActIndex={metricActIndex}
-          mountedActIndices={mountedActIndices}
-          weights={weights}
-          rebirthBlend={rebirthBlend}
-          worldAnchor={worldAnchor}
-          pointerOffset={pointerOffset}
-        />
-      </Suspense>
-
-      <VolumetricUI
-        activeAct={resolvedActiveAct}
-        nextAct={nextAct}
-        blend={effectivePhaseBlend}
-      />
-    </group>
+    </WorldMotionProvider>
   );
 }

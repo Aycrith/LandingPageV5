@@ -1,25 +1,90 @@
 "use client";
 
-import { useRef, useMemo } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
+import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
+import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
 import { seededUnit, seededSigned } from "@/lib/random";
 import { useActMaterialTierConfig } from "./materialTierConfig";
+import { getActWeight, useWorldMotionRef } from "@/canvas/worldMotion";
 
-interface ActProps {
-  progress: number;
-  visible: boolean;
+const ACT_INDEX = 5;
+const DENDRITE_COUNT = 50;
+const DENDRITE_SEGMENTS = 32;
+const DENDRITE_DURATION_SECONDS = 0.8;
+
+const NeuralPulseMaterial = shaderMaterial(
+  {
+    uTime: 0,
+    uOpacity: 0,
+    uPulseWidth: 0.16,
+    uSecondaryPulseMix: 1,
+    uBaseColor: new THREE.Color("#001a44"),
+    uPulseColor: new THREE.Color("#ffffff"),
+  },
+  `
+  attribute float aLineProgress;
+  attribute float aPulseHead;
+  attribute float aBranchPhase;
+
+  varying float vLineProgress;
+  varying float vPulseHead;
+  varying float vBranchPhase;
+
+  void main() {
+    vLineProgress = aLineProgress;
+    vPulseHead = aPulseHead;
+    vBranchPhase = aBranchPhase;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+  `,
+  `
+  uniform float uTime;
+  uniform float uOpacity;
+  uniform float uPulseWidth;
+  uniform float uSecondaryPulseMix;
+  uniform vec3 uBaseColor;
+  uniform vec3 uPulseColor;
+
+  varying float vLineProgress;
+  varying float vPulseHead;
+  varying float vBranchPhase;
+
+  float pulseStrength(float head, float progress, float width) {
+    return 1.0 - smoothstep(0.0, width, abs(progress - head));
+  }
+
+  void main() {
+    float activePulse = step(0.0, vPulseHead);
+    float primaryPulse = pulseStrength(vPulseHead, vLineProgress, uPulseWidth) * activePulse;
+    float secondaryHead = fract(vPulseHead - 0.18);
+    float secondaryPulse = pulseStrength(
+      secondaryHead,
+      vLineProgress,
+      uPulseWidth * 1.35
+    ) * activePulse * uSecondaryPulseMix;
+    float pulse = max(primaryPulse, secondaryPulse);
+    float shimmer = 0.52 + sin(uTime * 1.4 + vBranchPhase * 6.28318530718 + vLineProgress * 8.0) * 0.12;
+    vec3 color = mix(uBaseColor, uPulseColor, pulse);
+    float alpha = uOpacity * (0.18 * shimmer + pulse * 0.82);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+  `
+);
+
+extend({ NeuralPulseMaterial });
+
+declare module "@react-three/fiber" {
+  interface ThreeElements {
+    neuralPulseMaterial: ThreeElement<typeof NeuralPulseMaterial>;
+  }
 }
 
 // ── Microtubule Lattice ───────────────────────────────────────────────────────
 
-function MicrotubuleLattice({
-  progress,
-  visible,
-}: {
-  progress: number;
-  visible: boolean;
-}) {
+function MicrotubuleLattice() {
+  const motionRef = useWorldMotionRef();
   const tierConfig = useActMaterialTierConfig(5);
   const sphereCount = tierConfig.mesh.latticeCount;
   const sphereSegments = Math.max(4, tierConfig.mesh.primaryDetail);
@@ -70,6 +135,8 @@ function MicrotubuleLattice({
   }, [sphereCount]);
 
   useFrame((state) => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
     if (!instancedRef.current || !visible) return;
     const t = state.clock.elapsedTime;
     const appear = Math.min(progress / 0.25, 1);
@@ -108,7 +175,7 @@ function MicrotubuleLattice({
           blending={THREE.AdditiveBlending}
         />
       </instancedMesh>
-      <LatticeSpines latticeData={latticeData} progress={progress} visible={visible} />
+      <LatticeSpines latticeData={latticeData} />
     </>
   );
 }
@@ -117,13 +184,10 @@ function MicrotubuleLattice({
 
 function LatticeSpines({
   latticeData,
-  progress,
-  visible,
 }: {
   latticeData: Array<{ x: number; y: number; z: number; phase: number }>;
-  progress: number;
-  visible: boolean;
 }) {
+  const motionRef = useWorldMotionRef();
   const matRef = useRef<THREE.LineBasicMaterial>(null);
 
   // Build spine positions: connect adjacent outer and inner nodes per ring
@@ -154,6 +218,8 @@ function LatticeSpines({
   }, [latticeData]);
 
   useFrame((state) => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
     if (!matRef.current || !visible) return;
     const t = state.clock.elapsedTime;
     const appear = Math.min(progress / 0.25, 1);
@@ -186,13 +252,20 @@ function LatticeSpines({
 
 // ── Neural Firing Web ─────────────────────────────────────────────────────────
 
-const DENDRITE_COUNT = 50;
-
-function NeuralFiringWeb({ progress }: { progress: number }) {
+function NeuralFiringWeb() {
+  const motionRef = useWorldMotionRef();
   const tierConfig = useActMaterialTierConfig(5);
   const activeCount = tierConfig.mesh.dendriteCount;
 
-  const linesRef = useRef<THREE.Group>(null);
+  const lineSegmentsRef = useRef<THREE.LineSegments>(null);
+  const materialRef = useRef<
+    THREE.ShaderMaterial & {
+      uTime: number;
+      uOpacity: number;
+      uPulseWidth: number;
+      uSecondaryPulseMix: number;
+    }
+  >(null);
   const firePhase = useRef<Float32Array>(new Float32Array(DENDRITE_COUNT).fill(-1));
   // Frame-rate-independent firing: track next fire time as absolute clock time
   const nextFireTime = useRef<Float32Array>(
@@ -216,20 +289,56 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
     });
   }, []);
 
-  // positions: read in JSX (useMemo), mutated in useFrame via scratchRef
-  const positions = useMemo(
-    () => curves.map(() => new Float32Array(32 * 3)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
-  const scratchRef = useRef<Float32Array[]>(positions);
+  const mergedGeometry = useMemo(() => {
+    const segmentPairs = DENDRITE_SEGMENTS - 1;
+    const verticesPerDendrite = segmentPairs * 2;
+    const positions = new Float32Array(activeCount * verticesPerDendrite * 3);
+    const lineProgress = new Float32Array(activeCount * verticesPerDendrite);
+    const pulseHeads = new Float32Array(activeCount * verticesPerDendrite).fill(-1);
+    const branchPhases = new Float32Array(activeCount * verticesPerDendrite);
 
-  // Vertex colors for traveling action-potential wave
-  const vertexColors = useMemo(
-    () => curves.map(() => new Float32Array(32 * 3)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    for (let i = 0; i < activeCount; i++) {
+      const curve = curves[i];
+      const phase = seededUnit(i * 29 + 5);
+      const points = Array.from({ length: DENDRITE_SEGMENTS }, (_, step) =>
+        curve.getPointAt(step / (DENDRITE_SEGMENTS - 1))
+      );
+
+      for (let segment = 0; segment < segmentPairs; segment++) {
+        const from = points[segment];
+        const to = points[segment + 1];
+        const vertexIndex = i * verticesPerDendrite + segment * 2;
+        const positionOffset = vertexIndex * 3;
+        const fromProgress = segment / segmentPairs;
+        const toProgress = (segment + 1) / segmentPairs;
+
+        positions[positionOffset] = from.x;
+        positions[positionOffset + 1] = from.y;
+        positions[positionOffset + 2] = from.z;
+        positions[positionOffset + 3] = to.x;
+        positions[positionOffset + 4] = to.y;
+        positions[positionOffset + 5] = to.z;
+
+        lineProgress[vertexIndex] = fromProgress;
+        lineProgress[vertexIndex + 1] = toProgress;
+        branchPhases[vertexIndex] = phase;
+        branchPhases[vertexIndex + 1] = phase;
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("aLineProgress", new THREE.BufferAttribute(lineProgress, 1));
+    geometry.setAttribute("aPulseHead", new THREE.BufferAttribute(pulseHeads, 1));
+    geometry.setAttribute("aBranchPhase", new THREE.BufferAttribute(branchPhases, 1));
+
+    return geometry;
+  }, [activeCount, curves]);
+
+  const pulseHeadsRef = useRef<Float32Array>(
+    mergedGeometry.getAttribute("aPulseHead").array as Float32Array
   );
+  const verticesPerDendrite = useMemo(() => (DENDRITE_SEGMENTS - 1) * 2, []);
 
   // Fire intervals: each dendrite fires every 1.5–4.5s
   const fireIntervals = useMemo(
@@ -237,14 +346,26 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
     []
   );
 
+  useEffect(() => {
+    pulseHeadsRef.current = mergedGeometry.getAttribute("aPulseHead").array as Float32Array;
+
+    return () => {
+      mergedGeometry.dispose();
+    };
+  }, [mergedGeometry]);
+
   useFrame((state) => {
-    if (!linesRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    if (!lineSegmentsRef.current) return;
+    lineSegmentsRef.current.visible = visible;
+    if (!visible) return;
     const t = state.clock.elapsedTime;
     const appear = Math.min(progress / 0.3, 1);
+    const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
+    const pulseHeads = pulseHeadsRef.current;
 
     for (let i = 0; i < activeCount; i++) {
-      const line = linesRef.current.children[i] as THREE.Line;
-      if (!line) continue;
 
       // Trigger fire events — absolute time tracking, frame-rate independent
       const interval = fireIntervals[i];
@@ -252,78 +373,59 @@ function NeuralFiringWeb({ progress }: { progress: number }) {
         firePhase.current[i] = t;
         nextFireTime.current[i] = t + interval;
       }
-      const phase = firePhase.current[i] >= 0 ? (t - firePhase.current[i]) / 0.8 : -1;
-      if (phase > 1) firePhase.current[i] = -1;
-
-      // Update positions along curve
-      const curve = curves[i];
-      const pts = scratchRef.current[i];
-      for (let j = 0; j < 32; j++) {
-        const pt = curve.getPointAt(j / 31);
-        pts[j * 3] = pt.x;
-        pts[j * 3 + 1] = pt.y;
-        pts[j * 3 + 2] = pt.z;
+      let pulseHead =
+        firePhase.current[i] >= 0
+          ? (t - firePhase.current[i]) / DENDRITE_DURATION_SECONDS
+          : -1;
+      if (pulseHead > 1) {
+        firePhase.current[i] = -1;
+        pulseHead = -1;
       }
-      const posAttr = line.geometry.attributes.position as THREE.BufferAttribute;
-      const arr = posAttr.array as Float32Array;
-      arr.set(pts);
-      posAttr.needsUpdate = true;
 
-      // Traveling action-potential wave: per-vertex color, bright zone at wavefront
-      const mat = line.material as THREE.LineBasicMaterial;
-      const colAttr = line.geometry.attributes.color as THREE.BufferAttribute;
-      if (colAttr) {
-        const colArr = colAttr.array as Float32Array;
-        for (let j = 0; j < 32; j++) {
-          const tVertex = j / 31;
-          const waveProximity = phase >= 0
-            ? Math.max(0, 1 - Math.abs(tVertex - phase) / 0.2)
-            : 0;
-          const wave = waveProximity * waveProximity;
-          // Lerp: resting (#001a44) → peak (#00ffee → #ffffff)
-          colArr[j * 3]     = wave;              // R: 0 → 1
-          colArr[j * 3 + 1] = 0.102 + wave * 0.898; // G: 0.102 → 1.0
-          colArr[j * 3 + 2] = 0.267 + wave * 0.666; // B: 0.267 → 0.933
-        }
-        colAttr.needsUpdate = true;
-      }
-      mat.opacity = phase >= 0
-        ? (0.08 + 0.62 * Math.sin(phase * Math.PI)) * appear
-        : 0.08 * appear;
+      const start = i * verticesPerDendrite;
+      pulseHeads.fill(pulseHead, start, start + verticesPerDendrite);
+    }
+
+    const pulseHeadAttribute = mergedGeometry.getAttribute(
+      "aPulseHead"
+    ) as THREE.BufferAttribute;
+    pulseHeadAttribute.needsUpdate = true;
+
+    if (materialRef.current) {
+      materialRef.current.uTime = t;
+      materialRef.current.uOpacity = appear * fadeOut;
+      materialRef.current.uPulseWidth = tierConfig.shader.pulseWidth;
+      materialRef.current.uSecondaryPulseMix = tierConfig.shader.secondaryPulseMix;
     }
   });
 
+  if (activeCount === 0) {
+    return null;
+  }
+
   return (
-    <group ref={linesRef}>
-      {Array.from({ length: activeCount }, (_, i) => (
-        <line key={i}>
-          <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              args={[positions[i], 3]}
-            />
-            <bufferAttribute
-              attach="attributes-color"
-              args={[vertexColors[i], 3]}
-            />
-          </bufferGeometry>
-          <lineBasicMaterial
-            transparent
-            opacity={0.08}
-            vertexColors
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </line>
-      ))}
-    </group>
+    <lineSegments ref={lineSegmentsRef} geometry={mergedGeometry}>
+      <neuralPulseMaterial
+        ref={materialRef}
+        transparent
+        depthWrite={false}
+        toneMapped={false}
+        blending={THREE.AdditiveBlending}
+        uTime={0}
+        uOpacity={0}
+        uPulseWidth={tierConfig.shader.pulseWidth}
+        uSecondaryPulseMix={tierConfig.shader.secondaryPulseMix}
+        uBaseColor={new THREE.Color("#001a44")}
+        uPulseColor={new THREE.Color("#ffffff")}
+      />
+    </lineSegments>
   );
 }
 
 // ── Tubulin Particles ─────────────────────────────────────────────────────────
 
-function TubulinParticles({ progress, active }: { progress: number; active: boolean }) {
+function TubulinParticles() {
+  const motionRef = useWorldMotionRef();
   const tierConfig = useActMaterialTierConfig(5);
   const count = tierConfig.mesh.tubulinCount;
   const sphereSegments = Math.max(4, tierConfig.mesh.secondaryDetail);
@@ -345,6 +447,8 @@ function TubulinParticles({ progress, active }: { progress: number; active: bool
     }), [count]);
 
   useFrame((state) => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const active = progress > 0.01;
     if (!instancedRef.current || !active || count === 0) return;
     const t = state.clock.elapsedTime;
     const appear = Math.min(progress / 0.3, 1);
@@ -389,38 +493,103 @@ function TubulinParticles({ progress, active }: { progress: number; active: bool
 
 // ── Act Entry Point ───────────────────────────────────────────────────────────
 
-export function Act6QuantumConsciousness({ progress, visible }: ActProps) {
+export function Act6QuantumConsciousness() {
+  const motionRef = useWorldMotionRef();
   const groupRef = useRef<THREE.Group>(null);
+  const keyLightRef = useRef<THREE.PointLight>(null);
+  const fillLightRef = useRef<THREE.PointLight>(null);
 
   useFrame(() => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
     if (!groupRef.current) return;
     groupRef.current.visible = visible && progress > 0.01;
+    if (keyLightRef.current) {
+      keyLightRef.current.intensity = progress * 12;
+    }
+    if (fillLightRef.current) {
+      fillLightRef.current.intensity = progress * 8;
+    }
   });
 
-  if (!visible) return null;
-
   return (
-    <group ref={groupRef}>
-      <MicrotubuleLattice progress={progress} visible={visible} />
-      <NeuralFiringWeb progress={progress} />
-      <TubulinParticles progress={progress} active={visible} />
+    <group ref={groupRef} visible={false}>
+      <MicrotubuleLattice />
+      <NeuralFiringWeb />
+      <TubulinParticles />
 
       {/* Deep violet key light */}
       <pointLight
+        ref={keyLightRef}
         color="#4400aa"
-        intensity={12}
+        intensity={0}
         distance={20}
         decay={2}
         position={[-3, 2, 0]}
       />
       {/* Cyan fill light */}
       <pointLight
+        ref={fillLightRef}
         color="#00ccff"
-        intensity={8}
+        intensity={0}
         distance={20}
         decay={2}
         position={[4, -2, -4]}
       />
     </group>
+  );
+}
+
+export function NeuralPulseWarmupMesh() {
+  const warmupGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(
+        new Float32Array([
+          -0.6, 0, -6,
+          -0.1, 0.16, -6.2,
+          -0.1, 0.16, -6.2,
+          0.45, -0.08, -6.5,
+        ]),
+        3
+      )
+    );
+    geometry.setAttribute(
+      "aLineProgress",
+      new THREE.BufferAttribute(new Float32Array([0, 0.5, 0.5, 1]), 1)
+    );
+    geometry.setAttribute(
+      "aPulseHead",
+      new THREE.BufferAttribute(new Float32Array([0.62, 0.62, 0.62, 0.62]), 1)
+    );
+    geometry.setAttribute(
+      "aBranchPhase",
+      new THREE.BufferAttribute(new Float32Array([0.18, 0.18, 0.18, 0.18]), 1)
+    );
+    return geometry;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      warmupGeometry.dispose();
+    };
+  }, [warmupGeometry]);
+
+  return (
+    <lineSegments geometry={warmupGeometry}>
+      <neuralPulseMaterial
+        transparent
+        depthWrite={false}
+        toneMapped={false}
+        blending={THREE.AdditiveBlending}
+        uTime={0}
+        uOpacity={0.42}
+        uPulseWidth={0.16}
+        uSecondaryPulseMix={1}
+        uBaseColor={new THREE.Color("#001a44")}
+        uPulseColor={new THREE.Color("#ffffff")}
+      />
+    </lineSegments>
   );
 }

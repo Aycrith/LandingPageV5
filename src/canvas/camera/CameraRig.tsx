@@ -82,11 +82,18 @@ export function CameraRig() {
     const startupState = useSceneLoadStore.getState();
     let targetFov = startupSettle.fov;
     let allowParallax = startupSequenceComplete.current;
+    const isWarmupMount =
+      !startupState.warmupReady && startupState.warmupActIndex != null;
 
     if (!startupSequenceComplete.current) {
-      allowParallax = startupState.stableFrameReady;
+      allowParallax = startupState.stableFrameReady && !isWarmupMount;
 
-      if (!startupState.stableFrameReady) {
+      if (isWarmupMount) {
+        const warmupProfile = WORLD_PHASES[startupState.warmupActIndex!];
+        targetPos.current.copy(tupleToVector3(warmupProfile.settleCamera.position));
+        targetLookAt.current.copy(tupleToVector3(warmupProfile.settleCamera.lookAt));
+        targetFov = warmupProfile.settleCamera.fov;
+      } else if (!startupState.stableFrameReady) {
         targetPos.current.copy(startupPreview.position);
         targetLookAt.current.copy(startupPreview.lookAt);
         targetFov = startupPreview.fov;

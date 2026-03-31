@@ -1,17 +1,20 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Text } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { WORLD_PHASES, type WorldPhaseProfile } from "./viewportProfiles";
 import { useUIStore } from "@/stores/uiStore";
+import { useScrollStore } from "@/stores/scrollStore";
+import { useWorldMotionRef } from "./worldMotion";
 
-interface VolumetricUIProps {
-  activeAct: number;
-  nextAct: number;
-  blend: number;
-}
+type VolumetricTextMesh = THREE.Mesh & {
+  isText?: boolean;
+  fillOpacity: number;
+  strokeOpacity: number;
+  material?: THREE.Material | THREE.Material[];
+};
 
 function opacityScale(value: number) {
   return THREE.MathUtils.clamp(value, 0, 1);
@@ -23,18 +26,27 @@ function getAnchorX(profile: WorldPhaseProfile): "left" | "center" {
 
 function UiBlock({
   profile,
-  opacity,
-  emphasis,
-  showCtaRing,
+  role,
+  actIndex,
+  warmupVisible = false,
 }: {
   profile: WorldPhaseProfile;
-  opacity: number;
-  emphasis: number;
-  showCtaRing: boolean;
+  role?: "current" | "next";
+  actIndex?: number;
+  warmupVisible?: boolean;
 }) {
+  const motionRef = useWorldMotionRef();
   const blockRef = useRef<THREE.Group>(null);
+  const ctaGroupRef = useRef<THREE.Group>(null);
+  const ctaOrbMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
   const ctaFocused = useUIStore((state) => state.isCtaFocused);
   const targetQuat = useMemo(() => new THREE.Quaternion(), []);
+  const trackedMaterialsRef = useRef<Array<{ material: THREE.Material; baseOpacity: number }>>(
+    []
+  );
+  const trackedTextRef = useRef<
+    Array<{ text: VolumetricTextMesh; baseFillOpacity: number; baseStrokeOpacity: number }>
+  >([]);
   const align = getAnchorX(profile);
   const titleAnchor = align === "center" ? "center" : "left";
   const railLocal = [
@@ -47,19 +59,129 @@ function UiBlock({
     profile.uiRig.ctaAnchor[1] - profile.compositionZone.uiOffset[1],
     profile.uiRig.ctaAnchor[2] - profile.compositionZone.uiOffset[2],
   ] as const;
-  const ringIntensity = ctaFocused ? 1.35 : 0.8;
-  const ringOpacityBoost = ctaFocused ? 0.22 : 0;
+
+  useEffect(() => {
+    if (!blockRef.current) {
+      return;
+    }
+
+    const nextTrackedMaterials: Array<{
+      material: THREE.Material;
+      baseOpacity: number;
+    }> = [];
+    const nextTrackedText: Array<{
+      text: VolumetricTextMesh;
+      baseFillOpacity: number;
+      baseStrokeOpacity: number;
+    }> = [];
+
+    blockRef.current.traverse((child) => {
+      const mesh = child as THREE.Mesh & {
+        material?: THREE.Material | THREE.Material[];
+      };
+      const textMesh = child as VolumetricTextMesh;
+
+      if (textMesh.isText && textMesh.material) {
+        nextTrackedText.push({
+          text: textMesh,
+          baseFillOpacity: textMesh.fillOpacity ?? 1,
+          baseStrokeOpacity: textMesh.strokeOpacity ?? 0,
+        });
+      }
+
+      const materials = mesh.material
+        ? Array.isArray(mesh.material)
+          ? mesh.material
+          : [mesh.material]
+        : [];
+
+      for (const material of materials) {
+        material.transparent = true;
+        nextTrackedMaterials.push({
+          material,
+          baseOpacity: "opacity" in material ? material.opacity : 1,
+        });
+      }
+    });
+
+    trackedMaterialsRef.current = nextTrackedMaterials;
+    trackedTextRef.current = nextTrackedText;
+  }, [profile]);
 
   useFrame(({ camera }, delta) => {
     if (!blockRef.current) return;
+
+    const motion = motionRef.current;
+    const blend = motion.phaseBlend;
+    const isPinnedBlock = actIndex != null;
+    const currentOpacity = opacityScale(
+      1 - THREE.MathUtils.smootherstep(blend, 0.24, 0.82)
+    );
+    const nextOpacity = opacityScale(
+      THREE.MathUtils.smootherstep(blend, 0.52, 0.94)
+    );
+    const seedRebirthOpacity =
+      motion.activeAct === WORLD_PHASES.length - 1
+        ? opacityScale(THREE.MathUtils.smootherstep(blend, 0.72, 0.98))
+        : 0;
+    const opacity = isPinnedBlock
+      ? actIndex === motion.activeAct
+        ? currentOpacity
+        : motion.activeAct === WORLD_PHASES.length - 1 && actIndex === 0
+          ? seedRebirthOpacity
+          : actIndex === motion.nextAct
+            ? nextOpacity
+            : 0
+      : role === "current"
+        ? currentOpacity
+        : motion.activeAct === WORLD_PHASES.length - 1
+          ? seedRebirthOpacity
+          : nextOpacity;
+    const emphasis = isPinnedBlock
+      ? actIndex === motion.activeAct
+        ? 1 - blend * 0.4
+        : actIndex === motion.nextAct
+          ? blend
+          : 0
+      : role === "current"
+        ? 1 - blend * 0.4
+        : blend;
+    const showCtaRing = isPinnedBlock
+      ? actIndex === motion.activeAct &&
+        motion.activeAct === WORLD_PHASES.length - 1
+      : role === "current" && motion.activeAct === WORLD_PHASES.length - 1;
+    const ringIntensity = ctaFocused ? 1.35 : 0.8;
+    const resolvedOpacity = warmupVisible ? Math.max(opacity, 0.12) : opacity;
+
     targetQuat.copy(camera.quaternion);
     const follow = 1 - Math.pow(0.02, delta * (5 + profile.uiRig.faceCameraStrength * 4));
     blockRef.current.quaternion.slerp(targetQuat, follow);
-  });
+    blockRef.current.visible = warmupVisible || resolvedOpacity > 0.01;
+    blockRef.current.scale.setScalar(0.34 + emphasis * 0.03);
 
-  if (opacity <= 0.01) {
-    return null;
-  }
+    for (const { material, baseOpacity } of trackedMaterialsRef.current) {
+      if (!("opacity" in material)) {
+        continue;
+      }
+
+      // eslint-disable-next-line react-hooks/immutability
+      material.opacity = baseOpacity * resolvedOpacity;
+    }
+
+    for (const { text, baseFillOpacity, baseStrokeOpacity } of trackedTextRef.current) {
+      // eslint-disable-next-line react-hooks/immutability
+      text.fillOpacity = baseFillOpacity * resolvedOpacity;
+      text.strokeOpacity = baseStrokeOpacity * resolvedOpacity;
+    }
+
+    if (ctaGroupRef.current) {
+      ctaGroupRef.current.visible = warmupVisible || showCtaRing;
+    }
+    if (ctaOrbMaterialRef.current) {
+      ctaOrbMaterialRef.current.emissiveIntensity = ringIntensity;
+      ctaOrbMaterialRef.current.opacity = resolvedOpacity;
+    }
+  });
 
   return (
     <group
@@ -69,7 +191,7 @@ function UiBlock({
         profile.compositionZone.uiOffset[1],
         profile.compositionZone.uiOffset[2] - 0.85,
       ]}
-      scale={0.34 + emphasis * 0.03}
+      visible={false}
     >
       {profile.textSafeZone.panel === "glass" && (
         <mesh position={[0, 0.12, -0.02]}>
@@ -78,7 +200,7 @@ function UiBlock({
             transmission={0.8}
             roughness={0.0}
             transparent
-            opacity={profile.textSafeZone.veilOpacity * opacity}
+            opacity={profile.textSafeZone.veilOpacity}
             depthWrite={false}
             color="#001122"
           />
@@ -90,7 +212,7 @@ function UiBlock({
         <meshBasicMaterial
           color={profile.accent}
           transparent
-          opacity={0.42 * opacity}
+          opacity={0.42}
           toneMapped={false}
         />
       </mesh>
@@ -100,7 +222,7 @@ function UiBlock({
         <meshBasicMaterial
           color={profile.accent}
           transparent
-          opacity={0.72 * opacity}
+          opacity={0.72}
           toneMapped={false}
         />
       </mesh>
@@ -112,9 +234,9 @@ function UiBlock({
         color={profile.accent}
         anchorX={titleAnchor}
         anchorY="middle"
-        fillOpacity={0.82 * opacity}
+        fillOpacity={0.82}
         outlineColor="#020304"
-        outlineOpacity={0.36 * opacity}
+        outlineOpacity={0.36}
         outlineWidth={0.006}
         maxWidth={profile.uiRig.maxWidth}
       >
@@ -129,9 +251,9 @@ function UiBlock({
         color="#f6fbff"
         anchorX={titleAnchor}
         anchorY="middle"
-        fillOpacity={opacity}
+        fillOpacity={1}
         outlineColor="#020304"
-        outlineOpacity={0.28 * opacity}
+        outlineOpacity={0.28}
         outlineWidth={0.008}
         maxWidth={profile.uiRig.maxWidth}
       >
@@ -145,7 +267,7 @@ function UiBlock({
         color="#dce6ea"
         anchorX={titleAnchor}
         anchorY="middle"
-        fillOpacity={0.7 * opacity}
+        fillOpacity={0.7}
         maxWidth={profile.uiRig.maxWidth}
       >
         {profile.copy.subtitle.toUpperCase()}
@@ -159,33 +281,36 @@ function UiBlock({
           color="#adbac0"
           anchorX={titleAnchor}
           anchorY="top"
-          fillOpacity={0.58 * opacity}
+          fillOpacity={0.58}
           maxWidth={profile.uiRig.maxWidth}
         >
           {profile.copy.body}
         </Text>
       ) : null}
 
-      {showCtaRing && profile.copy.ctaLabel ? (
-        <group position={ctaLocal}>
+      {profile.copy.ctaLabel ? (
+        <group ref={ctaGroupRef} position={ctaLocal} visible={false}>
           <mesh rotation={[Math.PI / 2, 0, 0]}>
             <torusGeometry args={[0.34, 0.028, 12, 72]} />
             <meshBasicMaterial
               color={profile.accent}
               transparent
-              opacity={(0.64 + ringOpacityBoost) * opacity}
+              opacity={0.64}
               toneMapped={false}
             />
           </mesh>
           <mesh>
             <sphereGeometry args={[0.095, 24, 24]} />
             <meshStandardMaterial
+              ref={ctaOrbMaterialRef}
               color="#05080c"
               emissive={profile.accent}
-              emissiveIntensity={ringIntensity}
+              emissiveIntensity={0.8}
               metalness={0.86}
               roughness={0.16}
               toneMapped={false}
+              transparent
+              opacity={1}
             />
           </mesh>
           <Text
@@ -195,7 +320,7 @@ function UiBlock({
             color="#f9fdff"
             anchorX="center"
             anchorY="middle"
-            fillOpacity={opacity}
+            fillOpacity={1}
             maxWidth={2.6}
           >
             {profile.copy.ctaLabel.toUpperCase()}
@@ -207,33 +332,41 @@ function UiBlock({
 }
 
 export function VolumetricUI({
+  activeActOverride,
+}: {
+  activeActOverride?: number;
+}) {
+  const liveActiveAct = useScrollStore((state) => state.activeAct);
+  return (
+    <VolumetricUIContent activeAct={activeActOverride ?? liveActiveAct} />
+  );
+}
+
+export function StaticVolumetricUI({
   activeAct,
-  nextAct,
-  blend,
-}: VolumetricUIProps) {
+  warmupVisible = false,
+}: {
+  activeAct: number;
+  warmupVisible?: boolean;
+}) {
+  return <VolumetricUIContent activeAct={activeAct} warmupVisible={warmupVisible} />;
+}
+
+function VolumetricUIContent({
+  activeAct,
+  warmupVisible = false,
+}: {
+  activeAct: number;
+  warmupVisible?: boolean;
+}) {
+  const nextAct = (activeAct + 1) % WORLD_PHASES.length;
   const currentProfile = WORLD_PHASES[activeAct];
   const nextProfile = WORLD_PHASES[nextAct];
-  const nextOpacity = opacityScale(THREE.MathUtils.smootherstep(blend, 0.52, 0.94));
-  const currentOpacity = opacityScale(1 - THREE.MathUtils.smootherstep(blend, 0.24, 0.82));
-  const seedRebirthOpacity =
-    activeAct === WORLD_PHASES.length - 1
-      ? opacityScale(THREE.MathUtils.smootherstep(blend, 0.72, 0.98))
-      : 0;
 
   return (
     <>
-      <UiBlock
-        profile={currentProfile}
-        opacity={currentOpacity}
-        emphasis={1 - blend * 0.4}
-        showCtaRing={activeAct === WORLD_PHASES.length - 1}
-      />
-      <UiBlock
-        profile={nextProfile}
-        opacity={activeAct === WORLD_PHASES.length - 1 ? seedRebirthOpacity : nextOpacity}
-        emphasis={blend}
-        showCtaRing={false}
-      />
+      <UiBlock profile={currentProfile} role="current" warmupVisible={warmupVisible} />
+      <UiBlock profile={nextProfile} role="next" warmupVisible={warmupVisible} />
     </>
   );
 }

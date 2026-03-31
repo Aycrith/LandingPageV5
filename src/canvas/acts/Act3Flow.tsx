@@ -1,25 +1,102 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
+import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
 import { HologramMaterial } from "@/canvas/materials/HologramMaterial";
+import { resolveTextureVariantUrl } from "@/canvas/assetManifest";
+import {
+  getTextureSamplingOptions,
+  useActMaterialTierConfig,
+} from "@/canvas/acts/materialTierConfig";
 import { seededUnit } from "@/lib/random";
-import { useRepeatingTexture } from "@/lib/textures";
+import { useOptionalRepeatingTexture } from "@/lib/textures";
 import { GradientBlurBg } from "@/canvas/environment/GradientBlurBg";
 import { DottedWave } from "@/canvas/environment/DottedWave";
+import { getActWeight, useWorldMotionRef } from "@/canvas/worldMotion";
 
-interface ActProps {
-  progress: number;
-  visible: boolean;
+const ACT_INDEX = 2;
+
+const FlowSurfaceShaderMaterial = shaderMaterial(
+  {
+    uTime: 0,
+    uProgress: 0,
+    uOpacity: 0,
+    uColorA: new THREE.Color("#d0a2ff"),
+    uColorB: new THREE.Color("#6dc7ff"),
+  },
+  `
+  uniform float uTime;
+  uniform float uProgress;
+  varying vec2 vUv;
+  varying float vWaveHeight;
+  varying vec3 vViewPosition;
+  varying vec3 vWorldNormal;
+
+  void main() {
+    vUv = uv;
+
+    vec3 displaced = position;
+    float wave1 = sin(position.x * 0.4 + uTime * 0.6) * cos(position.y * 0.3 + uTime * 0.4);
+    float wave2 = sin(position.x * 1.0 + uTime * 1.0 + position.y * 0.6) * 0.35;
+    float wave3 = cos(position.x * 0.2 - uTime * 0.3 + position.y * 1.2) * 0.25;
+    float ripple = sin(length(position.xy) * 0.8 - uTime * 1.5) * 0.2;
+    float displacement = (wave1 + wave2 + wave3 + ripple) * uProgress;
+
+    displaced.z += displacement;
+    vWaveHeight = displacement;
+
+    vec4 worldPosition = modelMatrix * vec4(displaced, 1.0);
+    vec4 viewPosition = viewMatrix * worldPosition;
+    vViewPosition = viewPosition.xyz;
+    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+
+    gl_Position = projectionMatrix * viewPosition;
+  }
+  `,
+  `
+  uniform float uOpacity;
+  uniform vec3 uColorA;
+  uniform vec3 uColorB;
+
+  varying vec2 vUv;
+  varying float vWaveHeight;
+  varying vec3 vViewPosition;
+  varying vec3 vWorldNormal;
+
+  void main() {
+    vec3 viewDir = normalize(-vViewPosition);
+    float fresnel = pow(1.0 - max(dot(normalize(vWorldNormal), viewDir), 0.0), 2.4);
+    float waveBand = smoothstep(-0.6, 0.8, vWaveHeight);
+    float scan = sin((vUv.x + vUv.y) * 14.0) * 0.08 + 0.92;
+    vec3 color = mix(uColorB, uColorA, waveBand);
+    color *= scan + fresnel * 0.55;
+    float alpha = uOpacity * (0.7 + fresnel * 0.25);
+    gl_FragColor = vec4(color, alpha);
+  }
+  `
+);
+
+extend({ FlowSurfaceShaderMaterial });
+
+declare module "@react-three/fiber" {
+  interface ThreeElements {
+    flowSurfaceShaderMaterial: ThreeElement<typeof FlowSurfaceShaderMaterial>;
+  }
 }
-export function Act3Flow({ progress, visible }: ActProps) {
-  const groupRef = useRef<THREE.Group>(null);
-  const surfaceRef = useRef<THREE.Mesh>(null);
-  const surfacePositions = useRef<Float32Array | null>(null);
-  const normalFrameRef = useRef(0);
 
-  const ribbonCount = 4;
+export function Act3Flow() {
+  const motionRef = useWorldMotionRef();
+  const groupRef = useRef<THREE.Group>(null);
+  const surfaceMaterialRef = useRef<
+    THREE.ShaderMaterial & { uTime: number; uProgress: number; uOpacity: number }
+  >(null);
+  const keyLightRef = useRef<THREE.PointLight>(null);
+  const fillLightRef = useRef<THREE.PointLight>(null);
+  const tierConfig = useActMaterialTierConfig(2);
+
+  const ribbonCount = tierConfig.mesh.ribbonCount;
   const ribbonData = useMemo(() => {
     return Array.from({ length: ribbonCount }, (_, i) => ({
       radius: 1.8 + i * 0.45,
@@ -29,7 +106,7 @@ export function Act3Flow({ progress, visible }: ActProps) {
       frequency: 1.2 + seededUnit(i * 13 + 2) * 1.1,
       amplitude: 0.18 + seededUnit(i * 13 + 3) * 0.32,
     }));
-  }, []);
+  }, [ribbonCount]);
 
   const ribbonGeometries = useMemo(() => {
     return ribbonData.map((data) => {
@@ -58,68 +135,56 @@ export function Act3Flow({ progress, visible }: ActProps) {
   }, [planeGeo, ribbonGeometries]);
 
   useFrame((state) => {
-    if (!visible || !groupRef.current) return;
+    if (!groupRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    groupRef.current.visible = visible;
+    if (!visible) return;
     const t = state.clock.elapsedTime;
     groupRef.current.position.set(0.6, -2.6, 0);
 
-    if (surfaceRef.current) {
-      const geo = surfaceRef.current.geometry;
-      const pos = geo.attributes.position;
-      if (!surfacePositions.current) {
-        surfacePositions.current = new Float32Array(pos.array);
-      }
-      const orig = surfacePositions.current;
-
-      for (let i = 0; i < pos.count; i++) {
-        const x = orig[i * 3];
-        const z = orig[i * 3 + 2];
-        const wave1 =
-          Math.sin(x * 0.4 + t * 0.6) * Math.cos(z * 0.3 + t * 0.4) * 1.0;
-        const wave2 = Math.sin(x * 1.0 + t * 1.0 + z * 0.6) * 0.35;
-        const wave3 = Math.cos(x * 0.2 - t * 0.3 + z * 1.2) * 0.25;
-        const ripple =
-          Math.sin(Math.sqrt(x * x + z * z) * 0.8 - t * 1.5) * 0.2;
-        pos.array[i * 3 + 1] = (wave1 + wave2 + wave3 + ripple) * progress;
-      }
-
-      pos.needsUpdate = true;
-      normalFrameRef.current += 1;
-      if (normalFrameRef.current % 3 === 0) {
-        geo.computeVertexNormals();
-      }
-
+    if (surfaceMaterialRef.current) {
       const scaleIn = Math.min(progress / 0.25, 1);
-      surfaceRef.current.scale.setScalar(scaleIn);
-      const mat = surfaceRef.current.material as THREE.MeshStandardMaterial;
-      mat.opacity = scaleIn * 0.34;
+      surfaceMaterialRef.current.uTime = t;
+      surfaceMaterialRef.current.uProgress = progress;
+      surfaceMaterialRef.current.uOpacity = scaleIn * 0.34;
     }
 
     const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
     groupRef.current.visible = fadeOut > 0.01;
+    if (keyLightRef.current) {
+      keyLightRef.current.intensity = progress * 10;
+    }
+    if (fillLightRef.current) {
+      fillLightRef.current.intensity = progress * 4;
+    }
   });
 
-  if (!visible) return null;
-
   return (
-    <group ref={groupRef} rotation={[-0.14, 0, 0]} position={[0, -2.6, 0]}>
-      <GradientBlurBg progress={progress} />
-      <DottedWave progress={progress} color="#d0a2ff" yOffset={-1.8} />
+    <group
+      ref={groupRef}
+      rotation={[-0.14, 0, 0]}
+      position={[0, -2.6, 0]}
+      visible={false}
+    >
+      <GradientBlurBg actIndex={ACT_INDEX} />
+      <DottedWave actIndex={ACT_INDEX} color="#d0a2ff" yOffset={-1.8} />
 
       <mesh
-        ref={surfaceRef}
         geometry={planeGeo}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[1.8, -0.45, 0]}
       >
-        <meshStandardMaterial
-          color="#d0a2ff"
-          emissive="#d0a2ff"
-          emissiveIntensity={0.18}
-          metalness={0.8}
-          roughness={0.28}
+        <flowSurfaceShaderMaterial
+          ref={surfaceMaterialRef}
           transparent
-          opacity={0.32}
           side={THREE.DoubleSide}
+          depthWrite={false}
+          uTime={0}
+          uProgress={0}
+          uOpacity={0}
+          uColorA={new THREE.Color("#d0a2ff")}
+          uColorB={new THREE.Color("#6dc7ff")}
         />
       </mesh>
 
@@ -128,10 +193,9 @@ export function Act3Flow({ progress, visible }: ActProps) {
           key={i}
           geometry={geometry}
           data={ribbonData[i]}
-          progress={progress}
         />
       ))}
-      <Metal049ASurface progress={progress} />
+      <Metal049ASurface tierConfig={tierConfig} />
 
       <mesh position={[2.9, 0.4, -0.9]}>
         <cylinderGeometry args={[0.3, 0.5, 1, 16]} />
@@ -139,15 +203,17 @@ export function Act3Flow({ progress, visible }: ActProps) {
       </mesh>
 
       <pointLight
+        ref={keyLightRef}
         color="#d0a2ff"
-        intensity={progress * 10}
+        intensity={0}
         distance={20}
         decay={2}
         position={[2.6, 3.2, 0]}
       />
       <pointLight
+        ref={fillLightRef}
         color="#6dc7ff"
-        intensity={progress * 4}
+        intensity={0}
         distance={12}
         decay={2}
         position={[2.8, 3.8, -1]}
@@ -156,19 +222,40 @@ export function Act3Flow({ progress, visible }: ActProps) {
   );
 }
 
+export function FlowSurfaceWarmupMesh() {
+  return (
+    <mesh position={[-2.8, -1.4, -6]} rotation={[-Math.PI / 2, 0, 0]}>
+      <planeGeometry args={[2.2, 2.2, 1, 1]} />
+      <flowSurfaceShaderMaterial
+        transparent
+        side={THREE.DoubleSide}
+        depthWrite={false}
+        uTime={0}
+        uProgress={1}
+        uOpacity={0.24}
+        uColorA={new THREE.Color("#d0a2ff")}
+        uColorB={new THREE.Color("#6dc7ff")}
+      />
+    </mesh>
+  );
+}
+
 function FlowRibbon({
   geometry,
   data,
-  progress,
 }: {
   geometry: THREE.TubeGeometry;
   data: { speed: number; phase: number };
-  progress: number;
 }) {
+  const motionRef = useWorldMotionRef();
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
     if (!meshRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    meshRef.current.visible = visible;
+    if (!visible) return;
     meshRef.current.rotation.y =
       state.clock.elapsedTime * data.speed + data.phase;
     const mat = meshRef.current.material as THREE.MeshBasicMaterial;
@@ -188,29 +275,47 @@ function FlowRibbon({
   );
 }
 
-function Metal049ASurface({ progress }: { progress: number }) {
+function Metal049ASurface({
+  tierConfig,
+}: {
+  tierConfig: ReturnType<typeof useActMaterialTierConfig>;
+}) {
+  const motionRef = useWorldMotionRef();
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const colorMap = useRepeatingTexture(
-    "/textures/pbr/metal049a/Metal049A_2K-PNG_Color.png",
-    {
+  const colorMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useColorMap
+      ? resolveTextureVariantUrl(
+          "/textures/pbr/metal049a/Metal049A_2K-PNG_Color.png",
+          tierConfig.texture.resolution
+        )
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, {
       repeat: 6,
       colorSpace: THREE.SRGBColorSpace,
-    }
+    })
   );
-  const normalMap = useRepeatingTexture(
-    "/textures/pbr/metal049a/Metal049A_2K-PNG_NormalGL.png",
-    { repeat: 6 }
+  const normalMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useNormalMap
+      ? "/textures/pbr/metal049a/Metal049A_2K-PNG_NormalGL.png"
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, { repeat: 6 })
   );
-  const roughnessMap = useRepeatingTexture(
-    "/textures/pbr/metal049a/Metal049A_2K-PNG_Roughness.png",
-    { repeat: 6 }
+  const roughnessMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useRoughnessMap
+      ? "/textures/pbr/metal049a/Metal049A_2K-PNG_Roughness.png"
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, { repeat: 6 })
   );
-  const metalnessMap = useRepeatingTexture(
-    "/textures/pbr/metal049a/Metal049A_2K-PNG_Metalness.png",
-    { repeat: 6 }
+  const metalnessMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useMetalnessMap
+      ? "/textures/pbr/metal049a/Metal049A_2K-PNG_Metalness.png"
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, { repeat: 6 })
   );
 
   useFrame(() => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    if (progress <= 0.01) return;
     if (matRef.current) {
       matRef.current.opacity = Math.min(progress / 0.4, 1) * 0.65;
     }
@@ -221,10 +326,10 @@ function Metal049ASurface({ progress }: { progress: number }) {
       <circleGeometry args={[22, 64]} />
       <meshStandardMaterial
         ref={matRef}
-        map={colorMap}
-        normalMap={normalMap}
-        roughnessMap={roughnessMap}
-        metalnessMap={metalnessMap}
+        map={tierConfig.texture.useColorMap ? colorMap : null}
+        normalMap={tierConfig.texture.useNormalMap ? normalMap : null}
+        roughnessMap={tierConfig.texture.useRoughnessMap ? roughnessMap : null}
+        metalnessMap={tierConfig.texture.useMetalnessMap ? metalnessMap : null}
         roughness={0.3}
         metalness={0.85}
         transparent

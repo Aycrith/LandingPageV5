@@ -6,26 +6,76 @@ import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { WireframePulseMaterial } from "@/canvas/materials/WireframePulse";
 import { ACT_VIEWPORT_PROFILES } from "@/canvas/viewportProfiles";
+import { resolveTextureVariantUrl } from "@/canvas/assetManifest";
+import {
+  getTextureSamplingOptions,
+  useActMaterialTierConfig,
+} from "@/canvas/acts/materialTierConfig";
 import { seededUnit } from "@/lib/random";
 import { DynamicShaderBg } from "@/canvas/environment/DynamicShaderBg";
 import {
   fitScaleToViewportFill,
   useSceneBounds,
-  useStableSceneClone,
 } from "@/lib/scene";
-import { useRepeatingTexture } from "@/lib/textures";
-
-interface ActProps {
-  progress: number;
-  visible: boolean;
-}
+import { usePreparedSceneLease } from "@/lib/preparedSceneCache";
+import { useOptionalRepeatingTexture } from "@/lib/textures";
+import { getActWeight, useWorldMotionRef } from "@/canvas/worldMotion";
 
 const ACT_PROFILE = ACT_VIEWPORT_PROFILES[1];
+const ACT_INDEX = 1;
 
-function SatellitesModel({ progress }: { progress: number }) {
+interface PreparedSupportScene {
+  meshCount: number;
+}
+
+function buildSupportSceneCacheKey(
+  tierConfig: ReturnType<typeof useActMaterialTierConfig>
+) {
+  return [
+    "support:satellites",
+    tierConfig.mesh.detail,
+    tierConfig.texture.resolution,
+    tierConfig.material.emissiveScale,
+  ].join("|");
+}
+
+function prepareSupportScene(scene: THREE.Object3D): PreparedSupportScene {
+  let meshCount = 0;
+
+  scene.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh) {
+      return;
+    }
+
+    meshCount += 1;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = true;
+    mesh.geometry.computeBoundingSphere();
+  });
+
+  return { meshCount };
+}
+
+function SatellitesModel({
+  tierConfig,
+}: {
+  tierConfig: ReturnType<typeof useActMaterialTierConfig>;
+}) {
+  const motionRef = useWorldMotionRef();
   const groupRef = useRef<THREE.Group>(null);
   const gltf = useGLTF("/models/satellites/scene.gltf");
-  const sceneClone = useStableSceneClone(gltf.scene);
+  const cacheKey = useMemo(
+    () => buildSupportSceneCacheKey(tierConfig),
+    [tierConfig]
+  );
+  const sceneLease = usePreparedSceneLease(
+    cacheKey,
+    gltf.scene,
+    prepareSupportScene
+  );
+  const sceneClone = sceneLease.object;
   const bounds = useSceneBounds(gltf.scene);
 
   const fittedMaxScale = useMemo(
@@ -42,6 +92,10 @@ function SatellitesModel({ progress }: { progress: number }) {
 
   useFrame((state) => {
     if (!groupRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    groupRef.current.visible = visible;
+    if (!visible) return;
     groupRef.current.rotation.y = -state.clock.elapsedTime * 0.08;
     const appear = Math.max(0, (progress - 0.3) / 0.4);
     groupRef.current.scale.setScalar(
@@ -56,12 +110,16 @@ function SatellitesModel({ progress }: { progress: number }) {
   );
 }
 
-export function Act2Structure({ progress, visible }: ActProps) {
+export function Act2Structure() {
+  const motionRef = useWorldMotionRef();
   const groupRef = useRef<THREE.Group>(null);
   const globeRef = useRef<THREE.Mesh>(null);
   const instanceRef = useRef<THREE.InstancedMesh>(null);
+  const pointLightRef = useRef<THREE.PointLight>(null);
+  const fillLightRef = useRef<THREE.PointLight>(null);
 
-  const bodyCount = 18;
+  const tierConfig = useActMaterialTierConfig(1);
+  const bodyCount = tierConfig.mesh.bodyCount;
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   const orbits = useMemo(() => {
@@ -73,10 +131,14 @@ export function Act2Structure({ progress, visible }: ActProps) {
       scale: 0.04 + seededUnit(i * 17 + 4) * 0.12,
       yOffset: seededUnit(i * 17 + 5) * 2.2 - 1.1,
     }));
-  }, []);
+  }, [bodyCount]);
 
   useFrame((state) => {
-    if (!visible || !groupRef.current) return;
+    if (!groupRef.current) return;
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    const visible = progress > 0.01;
+    groupRef.current.visible = visible;
+    if (!visible) return;
     const t = state.clock.elapsedTime;
     groupRef.current.position.set(0.9, -0.1, 0);
 
@@ -116,11 +178,17 @@ export function Act2Structure({ progress, visible }: ActProps) {
     const fadeIn = Math.min(progress / 0.15, 1);
     const fadeOut = progress > 0.85 ? 1 - (progress - 0.85) / 0.15 : 1;
     groupRef.current.visible = visible && fadeIn * fadeOut > 0.01;
+    if (pointLightRef.current) {
+      pointLightRef.current.intensity = progress * 10;
+    }
+    if (fillLightRef.current) {
+      fillLightRef.current.intensity = progress * 2;
+    }
   });
 
   return (
-    <group ref={groupRef}>
-      <DynamicShaderBg progress={progress} />
+    <group ref={groupRef} visible={false}>
+      <DynamicShaderBg actIndex={ACT_INDEX} />
 
       <mesh ref={globeRef}>
         <icosahedronGeometry args={[2, 4]} />
@@ -143,15 +211,22 @@ export function Act2Structure({ progress, visible }: ActProps) {
       </instancedMesh>
 
       <Suspense fallback={null}>
-        <SatellitesModel progress={progress} />
+        <SatellitesModel tierConfig={tierConfig} />
       </Suspense>
 
-      <Rock063Ground progress={progress} />
+      <Rock063Ground tierConfig={tierConfig} />
 
-      <pointLight color="#6dc7ff" intensity={10} distance={25} decay={2} />
       <pointLight
+        ref={pointLightRef}
+        color="#6dc7ff"
+        intensity={0}
+        distance={25}
+        decay={2}
+      />
+      <pointLight
+        ref={fillLightRef}
         color="#ffffff"
-        intensity={2}
+        intensity={0}
         distance={12}
         decay={2}
         position={[2.2, 4.4, 0]}
@@ -160,25 +235,41 @@ export function Act2Structure({ progress, visible }: ActProps) {
   );
 }
 
-function Rock063Ground({ progress }: { progress: number }) {
+function Rock063Ground({
+  tierConfig,
+}: {
+  tierConfig: ReturnType<typeof useActMaterialTierConfig>;
+}) {
+  const motionRef = useWorldMotionRef();
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const colorMap = useRepeatingTexture(
-    "/textures/pbr/rock063/Rock063_2K-PNG_Color.png",
-    {
+  const colorMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useColorMap
+      ? resolveTextureVariantUrl(
+          "/textures/pbr/rock063/Rock063_2K-PNG_Color.png",
+          tierConfig.texture.resolution
+        )
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, {
       repeat: 8,
       colorSpace: THREE.SRGBColorSpace,
-    }
+    })
   );
-  const normalMap = useRepeatingTexture(
-    "/textures/pbr/rock063/Rock063_2K-PNG_NormalGL.png",
-    { repeat: 8 }
+  const normalMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useNormalMap
+      ? "/textures/pbr/rock063/Rock063_2K-PNG_NormalGL.png"
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, { repeat: 8 })
   );
-  const roughnessMap = useRepeatingTexture(
-    "/textures/pbr/rock063/Rock063_2K-PNG_Roughness.png",
-    { repeat: 8 }
+  const roughnessMap = useOptionalRepeatingTexture(
+    tierConfig.texture.useRoughnessMap
+      ? "/textures/pbr/rock063/Rock063_2K-PNG_Roughness.png"
+      : null,
+    getTextureSamplingOptions(tierConfig.texture, { repeat: 8 })
   );
 
   useFrame(() => {
+    const progress = getActWeight(motionRef.current, ACT_INDEX);
+    if (progress <= 0.01) return;
     if (matRef.current) {
       matRef.current.opacity = Math.min(progress / 0.4, 1) * 0.34;
     }
@@ -189,9 +280,9 @@ function Rock063Ground({ progress }: { progress: number }) {
       <circleGeometry args={[25, 64]} />
       <meshStandardMaterial
         ref={matRef}
-        map={colorMap}
-        normalMap={normalMap}
-        roughnessMap={roughnessMap}
+        map={tierConfig.texture.useColorMap ? colorMap : null}
+        normalMap={tierConfig.texture.useNormalMap ? normalMap : null}
+        roughnessMap={tierConfig.texture.useRoughnessMap ? roughnessMap : null}
         roughness={1}
         metalness={0}
         transparent

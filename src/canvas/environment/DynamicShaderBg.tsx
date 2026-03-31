@@ -5,6 +5,7 @@ import { useFrame, extend, type ThreeElement } from "@react-three/fiber";
 import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
 import { useCursorStore } from "@/stores/cursorStore";
+import { getActWeight, isActVisible, useWorldMotionRef } from "@/canvas/worldMotion";
 
 // Animated WebGL shader background for Act2 — wave/mosaic distortion with RGB channel separation
 const DynamicShaderBgMaterial = shaderMaterial(
@@ -67,22 +68,33 @@ declare module "@react-three/fiber" {
 }
 
 interface DynamicShaderBgProps {
-  progress: number;
+  actIndex: number;
+  enabled?: boolean;
 }
 
-export function DynamicShaderBg({ progress }: DynamicShaderBgProps) {
+export function DynamicShaderBg({
+  actIndex,
+  enabled = true,
+}: DynamicShaderBgProps) {
+  const motionRef = useWorldMotionRef();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const matRef = useRef<any>(null);
   const mouseVec = useMemo(() => new THREE.Vector2(0.5, 0.5), []);
 
   useFrame((state) => {
-    if (!matRef.current) return;
+    const motion = motionRef.current;
+    const progress = getActWeight(motion, actIndex);
+    if (!enabled || !matRef.current || !isActVisible(motion, actIndex)) return;
     matRef.current.uTime = state.clock.elapsedTime;
     const { x, y } = useCursorStore.getState();
     mouseVec.set(x, y);
     matRef.current.uMouse = mouseVec;
     matRef.current.uIntensity = Math.min(progress / 0.4, 1);
   });
+
+  if (!enabled) {
+    return null;
+  }
 
   return (
     <mesh position={[0, 0, -10]} scale={[28, 16, 1]}>
