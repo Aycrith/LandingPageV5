@@ -335,6 +335,13 @@ function StartupTexturePreloader({
 
 export function SceneStartupController() {
   const caps = useCapsStore((state) => state.caps);
+  const auditMode = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("audit") === "1",
+    []
+  );
+
   useLayoutEffect(() => {
     if (!caps) return;
     useSceneLoadStore.getState().resetStartup();
@@ -410,7 +417,9 @@ export function SceneStartupController() {
     const runtimeCaps = caps;
     let cancelled = false;
     const loadBudgetMs = runtimeCaps.budgets.loadTimeMs;
-    const backgroundWarmupQueue = DEFERRED_WARMUP_CHECKPOINT_QUEUE;
+    const backgroundWarmupQueue = auditMode
+      ? DEFERRED_WARMUP_CHECKPOINT_QUEUE
+      : [];
 
     async function runStartupPipeline() {
       try {
@@ -440,10 +449,9 @@ export function SceneStartupController() {
           .catch((error) => {
             console.warn("[SceneStartupController] Near-scroll preload lagged.", error);
           });
-        const deferredAssetIds = getEffectiveStartupAssetIdsForStage(
-          "deferred",
-          runtimeCaps.tier
-        );
+        const deferredAssetIds = auditMode
+          ? getEffectiveStartupAssetIdsForStage("deferred", runtimeCaps.tier)
+          : [];
         const deferredWarmupTimeoutMs = Math.max(loadBudgetMs * 6, 30_000);
         const store = useSceneLoadStore.getState();
         if (backgroundWarmupQueue.length > 0 || deferredAssetIds.length > 0) {
@@ -497,7 +505,7 @@ export function SceneStartupController() {
       useSceneLoadStore.getState().setOffscreenWarmupActIndex(null);
       useSceneLoadStore.getState().setOffscreenWarmupCheckpointId(null);
     };
-  }, [caps]);
+  }, [auditMode, caps]);
 
   if (!caps) {
     return null;
@@ -553,33 +561,37 @@ export function SceneStartupController() {
           actIndex={texture.actIndex}
         />
       ))}
-      {STARTUP_DEFERRED_PRELOAD_GROUPS.map((group) => (
-        <Suspense key={group.url} fallback={null}>
-          {group.kind === "environment" ? (
-            <StartupEnvironmentPreloader
-              path={group.url}
-              readinessIds={group.readinessIds}
+      {auditMode
+        ? STARTUP_DEFERRED_PRELOAD_GROUPS.map((group) => (
+            <Suspense key={group.url} fallback={null}>
+              {group.kind === "environment" ? (
+                <StartupEnvironmentPreloader
+                  path={group.url}
+                  readinessIds={group.readinessIds}
+                />
+              ) : (
+                <StartupModelPreloader
+                  path={group.url}
+                  readinessIds={group.readinessIds}
+                />
+              )}
+            </Suspense>
+          ))
+        : null}
+      {auditMode
+        ? STARTUP_DEFERRED_TEXTURE_PRELOADS.map((texture) => (
+            <StartupTexturePreloader
+              key={texture.id}
+              assetId={texture.id}
+              url={texture.url}
+              repeat={texture.repeat}
+              colorSpace={
+                texture.colorSpace === "srgb" ? THREE.SRGBColorSpace : undefined
+              }
+              actIndex={texture.actIndex}
             />
-          ) : (
-            <StartupModelPreloader
-              path={group.url}
-              readinessIds={group.readinessIds}
-            />
-          )}
-        </Suspense>
-      ))}
-      {STARTUP_DEFERRED_TEXTURE_PRELOADS.map((texture) => (
-        <StartupTexturePreloader
-          key={texture.id}
-          assetId={texture.id}
-          url={texture.url}
-          repeat={texture.repeat}
-          colorSpace={
-            texture.colorSpace === "srgb" ? THREE.SRGBColorSpace : undefined
-          }
-          actIndex={texture.actIndex}
-        />
-      ))}
+          ))
+        : null}
     </>
   );
 }

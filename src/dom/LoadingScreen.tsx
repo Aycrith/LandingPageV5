@@ -11,6 +11,13 @@ export function LoadingScreen() {
 
   useEffect(() => {
     if (!isReady) return;
+    const auditMode =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("audit") === "1";
+    if (auditMode) {
+      dismissLoading();
+      return;
+    }
     const timer = setTimeout(dismissLoading, 1200);
     return () => clearTimeout(timer);
   }, [isReady, dismissLoading]);

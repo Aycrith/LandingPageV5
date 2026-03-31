@@ -75,6 +75,12 @@ export default function Experience() {
       new URLSearchParams(window.location.search).get("debug") === "1",
     []
   );
+  const auditMode = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("audit") === "1",
+    []
+  );
   const safeModeRequested = useMemo(() => {
     if (typeof window === "undefined") {
       return false;
@@ -124,11 +130,11 @@ export default function Experience() {
           }
         }}
       >
-        <ShaderWarmupHost />
         <SceneStartupController />
-        <SceneWarmupHost />
+        {auditMode ? <ShaderWarmupHost /> : null}
+        {auditMode ? <SceneWarmupHost /> : null}
         <StartupReadinessGate />
-        <ViewportAuditProbe />
+        {auditMode ? <ViewportAuditProbe /> : null}
         {process.env.NODE_ENV === "development" && <SceneDigest />}
         <CameraRig />
         {!hasFallbackTriggered && (
